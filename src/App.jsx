@@ -596,6 +596,13 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
   };
   const removeHoliday = (id) => setHolidaySettings({ ...holidaySettings, holidays: holidaySettings.holidays.filter((h) => h.id !== id) });
 
+  const mergeHolidays = (fetched) => {
+    const existingKeys = new Set(holidaySettings.holidays.map((h) => `${h.name}|${h.start}|${h.end}`));
+    const merged = [...holidaySettings.holidays, ...fetched.filter((h) => !existingKeys.has(`${h.name}|${h.start}|${h.end}`))];
+    merged.sort((a, b) => a.start.localeCompare(b.start));
+    setHolidaySettings({ ...holidaySettings, holidays: merged });
+  };
+
   const loadHolidaysOnline = async () => {
     setLoadingHolidays(true);
     setHolidayError("");
@@ -604,7 +611,7 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
       const years = [year - 1, year, year + 1];
       const results = await Promise.all(
         years.map((y) =>
-          fetch(`https://ferien-api.de/api/v1/holidays/${holidaySettings.bundesland}/${y}`).then((r) => {
+          fetch(`https://schulferien-api.de/api/v1/${y}/${holidaySettings.bundesland}/`).then((r) => {
             if (!r.ok) throw new Error("Netzwerkfehler");
             return r.json();
           })
@@ -613,15 +620,70 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
       const fetched = results.flat().map((h) => ({
         id: uid(), name: h.name, start: h.start.slice(0, 10), end: h.end.slice(0, 10),
       }));
-      const existingKeys = new Set(holidaySettings.holidays.map((h) => `${h.name}|${h.start}|${h.end}`));
-      const merged = [...holidaySettings.holidays, ...fetched.filter((h) => !existingKeys.has(`${h.name}|${h.start}|${h.end}`))];
-      merged.sort((a, b) => a.start.localeCompare(b.start));
-      setHolidaySettings({ ...holidaySettings, holidays: merged });
+      mergeHolidays(fetched);
     } catch (e) {
-      setHolidayError("Ferien konnten nicht automatisch geladen werden. Bitte manuell eintragen oder später erneut versuchen.");
+      setHolidayError("Ferien konnten nicht automatisch geladen werden. Bitte alternativ eine ICS-Datei importieren oder manuell eintragen.");
     } finally {
       setLoadingHolidays(false);
     }
+  };
+
+  // Sehr einfacher ICS-Parser: liest BEGIN:VEVENT-Blöcke und deren SUMMARY/DTSTART/DTEND.
+  const parseICS = (text) => {
+    const lines = text.replace(/\r\n/g, "\n").split("\n");
+    // Zeilen, die mit Leerzeichen/Tab beginnen, gehören zur vorherigen Zeile (ICS-Zeilenumbruch-Regel)
+    const unfolded = [];
+    lines.forEach((line) => {
+      if (/^[ \t]/.test(line) && unfolded.length) unfolded[unfolded.length - 1] += line.slice(1);
+      else unfolded.push(line);
+    });
+    const toDateStr = (raw) => {
+      const digits = raw.replace(/[^0-9]/g, "");
+      return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+    };
+    const subDay = (dateStr) => { const d = parseISODate(dateStr); d.setDate(d.getDate() - 1); return toISODate(d); };
+
+    const events = [];
+    let cur = null;
+    unfolded.forEach((line) => {
+      if (line.startsWith("BEGIN:VEVENT")) cur = {};
+      else if (line.startsWith("END:VEVENT")) { if (cur?.startRaw) events.push(cur); cur = null; }
+      else if (cur) {
+        const idx = line.indexOf(":");
+        if (idx === -1) return;
+        const key = line.slice(0, idx).split(";")[0].toUpperCase();
+        const value = line.slice(idx + 1).trim();
+        if (key === "SUMMARY") cur.name = value.replace(/\\,/g, ",").replace(/\\n/gi, " ");
+        else if (key === "DTSTART") cur.startRaw = value;
+        else if (key === "DTEND") cur.endRaw = value;
+      }
+    });
+
+    return events.map((e) => {
+      const start = toDateStr(e.startRaw);
+      let end = e.endRaw ? toDateStr(e.endRaw) : start;
+      // Bei ganztägigen ICS-Terminen ist DTEND laut Standard exklusiv (Folgetag) – daher einen Tag zurückrechnen
+      if (end > start) end = subDay(end);
+      return { id: uid(), name: e.name || "Ferien", start, end };
+    });
+  };
+
+  const importICS = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setHolidayError("");
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const fetched = parseICS(reader.result);
+        if (!fetched.length) { setHolidayError("In der Datei wurden keine Termine gefunden."); return; }
+        mergeHolidays(fetched);
+      } catch (err) {
+        setHolidayError("ICS-Datei konnte nicht gelesen werden.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
   };
 
   const exportJSON = () => {
@@ -726,6 +788,14 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
           {loadingHolidays ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
           {loadingHolidays ? "Lade Ferientermine …" : "Ferien automatisch laden"}
         </button>
+        <label className="w-full flex items-center justify-center gap-2 border border-stone-300 py-2.5 text-sm text-stone-700 hover:bg-stone-100 cursor-pointer mb-2">
+          <Upload size={15} /> Ferien aus ICS-Datei importieren
+          <input type="file" accept=".ics,text/calendar" onChange={importICS} className="hidden" />
+        </label>
+        <p className="text-xs text-stone-400 mb-2">
+          ICS-Dateien bekommst du z. B. von der Website deines Kultusministeriums oder von Kalender-Anbietern, die
+          Schulferien als Kalender zum Download anbieten – Vorschau/Prüfung nach dem Import empfohlen.
+        </p>
         {holidayError && <p className="text-xs text-rose-700 mb-2">{holidayError}</p>}
 
         <div className="border border-stone-300">
