@@ -1,6 +1,6 @@
 # Pensum – Projektkontext für KI
 
-Stand: 03.09.2026
+Stand: 03.09.2026 (mit Ergänzung: Soll-/Ist-/Abwesenheitsmodell)
 
 ## 1. Projekt
 
@@ -64,6 +64,7 @@ Die Tagesansicht berücksichtigt:
 
 - Wochentage und Wochenenden
 - Schulferien
+- Tages-Status (Arbeit / Krank / Urlaub)
 - konfigurierbare Schulstunden
 - Stundenplan-Vorlagen
 - einzelne erfasste Stunden
@@ -72,7 +73,23 @@ Die Tagesansicht berücksichtigt:
 - Bemerkungen
 - Kennzeichnung ausgefallener Stunden
 
-An Wochenenden und Ferientagen wird kein Schulstundenraster angezeigt. Es können dort weiterhin freie Einträge erfasst werden.
+An Wochenenden, Ferientagen und an Tagen mit Status „Krank“ oder „Urlaub“ wird kein Schulstundenraster angezeigt.
+Es können dort weiterhin freie Einträge erfasst werden.
+
+### Tages-Status: Krankheit und Urlaub
+
+Jeder Tag kann in der Tagesansicht auf `WORK` (Standard, kein gespeicherter Eintrag), `SICK` oder `VACATION` gesetzt
+werden. Der Status ist unabhängig von den erfassten Zeiteinträgen:
+
+- Er beeinflusst **nicht** die tatsächlich geleistete Arbeitszeit (Ist) – vorhandene Einträge an einem Krank-/
+  Urlaubstag zählen weiterhin normal zur Ist-Arbeitszeit, falls doch etwas erfasst wurde.
+- Er bestimmt aber, ob das Tages-Soll dieses Tages in der Auswertung als **anrechenbare Abwesenheit** gezählt wird
+  (siehe Abschnitt 6a und 11).
+
+Dies setzt bewusst nur den ersten Teil des größeren Soll/Ist/Abwesenheits-Konzepts um. Nicht umgesetzt sind bislang:
+weitere Statuswerte (`HOLIDAY`, `SCHOOL_BREAK`, `OTHER_ABSENCE`), eine Jahresarbeitszeit-/Kalenderjahr-Betrachtung,
+mehrere Bundesland-spezifische Arbeitszeitmodelle und die getrennte Durchschnittsanzeige (nur tatsächliche Arbeitszeit
+vs. inkl. Abwesenheiten). Diese können in einem späteren Schritt ergänzt werden.
 
 ### Stundenplan-Vorlagen
 
@@ -103,6 +120,29 @@ Aktuell gelten diese Tätigkeiten als **keine Arbeitszeit**:
 - `Ausgefallen`
 
 Die Dauer eines normalen Eintrags ist `max(0, Ende - Start)`.
+
+## 6a. Soll-Arbeitszeit (Arbeitszeitmodell)
+
+Zusätzlich zur Ist-Arbeitszeit aus den Einträgen berechnet die App eine **Soll-Arbeitszeit**. Grundlage sind:
+
+- `config.employment.percentage` – Beschäftigungsumfang in Prozent (Standard 100).
+- `config.employment.fullTimeWeeklyReferenceMinutes` – Vollzeit-Wochenreferenz in Minuten (Standard 46:38 h,
+  orientiert am niedersächsischen Referenzmodell, frei konfigurierbar).
+- `config.employment.individualWeeklyTargetMinutes` – optionale individuelle Wochen-Sollzeit; wenn gesetzt,
+  überschreibt sie die prozentuale Berechnung vollständig.
+
+Wichtige Helfer in `src/App.jsx`:
+
+- `effectiveWeeklyTargetMinutes(employment)` → effektives Wochensoll in Minuten.
+- `weekdayPeriodCounts(templates, date)` → Anzahl geplanter Stunden je Wochentag (Mo–Fr) aus der für das Datum
+  aktiven Stundenplan-Vorlage, oder `null` ohne aktive Vorlage.
+- `dailyTargetMinutes(templates, employment, date)` → Tages-Soll. Das Wochensoll wird proportional zur Anzahl
+  geplanter Stunden an diesem Wochentag verteilt (mehr Unterricht an einem Tag → höheres Tages-Soll). Ohne aktive
+  Vorlage oder ohne geplante Stunden darin wird gleichmäßig auf 5 Werktage verteilt. Am Wochenende ist das Soll 0.
+- `dayStatusOf(dayStatus, date)` → `"WORK"`, `"SICK"` oder `"VACATION"` für ein Datum (Standard `"WORK"`).
+
+Das Tages-Soll ist **unabhängig vom Ferienstatus** – Ferien reduzieren das Soll aktuell nicht automatisch (siehe
+Abschnitt 5, offene Punkte).
 
 ## 7. Standard-Stundenraster
 
@@ -159,6 +199,7 @@ Aktuelle Speicher-Keys:
 - `templates`
 - `holidays`
 - `entries`
+- `dayStatus`
 
 `src/storage.js` stellt dafür `loadJSON()` und `saveJSON()` bereit.
 
@@ -171,9 +212,17 @@ Aktuelle Speicher-Keys:
   periods: [
     { nr, start, end }
   ],
-  activities: ["Unterricht", ...]
+  activities: ["Unterricht", ...],
+  employment: {
+    percentage: 100,
+    fullTimeWeeklyReferenceMinutes: 2798, // 46:38 h
+    individualWeeklyTargetMinutes: null,
+  }
 }
 ```
+
+`config.employment` wird beim Laden additiv mit `DEFAULT_EMPLOYMENT` zusammengeführt, damit ältere gespeicherte
+Configs ohne dieses Feld kompatibel bleiben.
 
 `templates`:
 
@@ -224,6 +273,17 @@ Aktuelle Speicher-Keys:
 
 Bei Einträgen für reguläre Schulstunden wird `periodNr` verwendet. Bei Pausen zwischen Stunden wird zusätzlich ein `slot` wie `pause-1` verwendet. Freie Einträge haben `periodNr: null` und `slot: null`.
 
+`dayStatus`:
+
+```js
+{
+  "YYYY-MM-DD": { status: "SICK" | "VACATION" }
+}
+```
+
+Nur Tage mit Status `SICK` oder `VACATION` besitzen einen Eintrag. Fehlt ein Datum in `dayStatus`, gilt implizit
+`status: "WORK"`. Das Setzen von `"WORK"` in der Tagesansicht löscht daher den Eintrag statt ihn zu speichern.
+
 ## 10. Ferien
 
 Das Bundesland ist konfigurierbar. Der aktuelle Initialwert ist `NW`.
@@ -251,11 +311,18 @@ Die Auswertung unterstützt:
 
 Sie berechnet:
 
-- gesamte Arbeitszeit im Zeitraum
+- tatsächlich geleistete Arbeitszeit (Ist) im Zeitraum
+- Soll-Arbeitszeit im Zeitraum (Summe der Tages-Soll-Werte, siehe Abschnitt 6a)
+- anrechenbare Abwesenheitszeit (Summe der Tages-Soll-Werte an Tagen mit Status `SICK`/`VACATION`)
+- Bilanz/Differenz: `Ist + anrechenbare Abwesenheit − Soll`
 - Arbeitszeit nach Tätigkeit
 - Detailzeilen für den CSV-Export
 
-`Eigene Pause` und `Ausgefallen` werden bei der Gesamtarbeitszeit und der Tätigkeitsauswertung ausgeschlossen.
+`Eigene Pause` und `Ausgefallen` werden bei der Ist-Arbeitszeit und der Tätigkeitsauswertung ausgeschlossen.
+
+Die vier Kennzahlen (Ist, Soll, Anrechnung, Bilanz) werden für Tag/Woche/Monat/freien Zeitraum gleich berechnet – die
+Soll- und Anrechnungswerte iterieren dafür Tag für Tag über den gewählten Zeitraum, unabhängig von den tatsächlich
+erfassten Einträgen. Der CSV-Export enthält weiterhin nur die einzelnen Zeiteinträge, keine Tages-Soll-Werte.
 
 Der CSV-Export enthält unter anderem:
 
@@ -282,7 +349,8 @@ Der JSON-Export enthält aktuell:
   config,
   templates,
   holidaySettings,
-  entries
+  entries,
+  dayStatus
 }
 ```
 
@@ -320,3 +388,6 @@ Eine solche Aufteilung sollte jedoch nicht nur aus Gründen der Optik erfolgen. 
 - Ferien aus dem externen Dienst sollten vor produktiver Nutzung geprüft werden.
 - `Ausgefallen` wird in der Oberfläche verwendet und von der Arbeitszeitberechnung ausgeschlossen, obwohl es nicht Teil der initialen `DEFAULT_ACTIVITIES`-Liste ist.
 - Die App ist aktuell auf deutsche Sprache und deutsche Datumsformatierung ausgelegt.
+- Das Soll-/Ist-/Anrechnungsmodell (Abschnitt 6a, 11) ist ein erster Ausbauschritt eines größeren Konzepts. Es fehlen
+  bislang insbesondere: weitere Abwesenheitsarten über Krankheit/Urlaub hinaus, eine Ferien-/Feiertags-Anrechnung
+  auf das Soll, eine Jahresarbeitszeit-Betrachtung und mehrere auswählbare Arbeitszeitmodelle je Bundesland.

@@ -40,6 +40,17 @@ const BUNDESLAENDER = [
 const NONWORK = new Set(["Eigene Pause", "Ausgefallen"]);
 const WD_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
+// Arbeitszeitmodell: Vollzeit-Referenz orientiert sich am niedersächsischen Referenzmodell
+// (46:38 h/Woche), ist aber bewusst konfigurierbar und kein gesetzlich verbindlicher Wert.
+const DEFAULT_EMPLOYMENT = {
+  percentage: 100,
+  fullTimeWeeklyReferenceMinutes: 46 * 60 + 38, // 46:38 h
+  individualWeeklyTargetMinutes: null, // wenn gesetzt, überschreibt dies percentage-basierte Berechnung
+};
+const DEFAULT_CONFIG = { periods: DEFAULT_PERIODS, activities: DEFAULT_ACTIVITIES, employment: DEFAULT_EMPLOYMENT };
+
+const DAY_STATUS_LABELS = { WORK: "Arbeit", SICK: "Krank", VACATION: "Urlaub" };
+
 /* ---------------------------------- Helfer ---------------------------------- */
 
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -73,6 +84,39 @@ const findHolidayFor = (holidays, date) => {
   const key = toISODate(date);
   return holidays.find((h) => key >= h.start && key <= h.end) || null;
 };
+
+/* ---------- Soll-Arbeitszeit (Arbeitszeitmodell) ---------- */
+
+// Effektives Wochensoll: individuelle Angabe hat Vorrang vor der prozentualen Berechnung.
+const effectiveWeeklyTargetMinutes = (employment) => {
+  if (employment.individualWeeklyTargetMinutes != null) return employment.individualWeeklyTargetMinutes;
+  return Math.round(employment.fullTimeWeeklyReferenceMinutes * (employment.percentage / 100));
+};
+
+// Anzahl geplanter Stunden je Wochentag (Mo–Fr) aus der für das Datum aktiven Stundenplan-Vorlage.
+const weekdayPeriodCounts = (templates, date) => {
+  const template = findTemplateFor(templates, date);
+  if (!template) return null;
+  const counts = [0, 0, 0, 0, 0];
+  for (let wd = 0; wd < 5; wd++) counts[wd] = Object.keys(template.days[wd] || {}).length;
+  return counts;
+};
+
+// Tages-Soll: Wochensoll gewichtet nach Anteil der geplanten Stunden an diesem Wochentag.
+// Ohne aktive Vorlage (oder ohne geplante Stunden darin) wird gleichmäßig auf 5 Werktage verteilt.
+// Am Wochenende ist das Soll 0.
+const dailyTargetMinutes = (templates, employment, date) => {
+  const wd = wdIndex(date);
+  if (wd >= 5) return 0;
+  const weeklyTarget = effectiveWeeklyTargetMinutes(employment);
+  const counts = weekdayPeriodCounts(templates, date);
+  if (!counts) return weeklyTarget / 5;
+  const totalWeek = counts.reduce((a, b) => a + b, 0);
+  if (totalWeek === 0) return weeklyTarget / 5;
+  return weeklyTarget * (counts[wd] / totalWeek);
+};
+
+const dayStatusOf = (dayStatus, date) => (dayStatus[toISODate(date)] || {}).status || "WORK";
 
 /* ---------------------------------- Kleinbausteine ---------------------------------- */
 
@@ -141,14 +185,15 @@ function EntryForm({ initial, activities, onSave, onCancel, onDelete }) {
 
 /* ---------------------------------- Tagesansicht ---------------------------------- */
 
-function TagView({ date, setDate, entries, setDayEntries, config, templates, holidays }) {
+function TagView({ date, setDate, entries, setDayEntries, config, templates, holidays, dayStatus, setDayStatus }) {
   const dateKey = toISODate(date);
   const wd = wdIndex(date);
   const isWeekend = wd >= 5;
   const holiday = findHolidayFor(holidays, date);
+  const status = dayStatusOf(dayStatus, date);
   const activeTemplate = findTemplateFor(templates, date);
   const dayTemplate = (!isWeekend && activeTemplate) ? (activeTemplate.days[wd] || {}) : {};
-  const showGrid = !isWeekend && !holiday;
+  const showGrid = !isWeekend && !holiday && status === "WORK";
 
   const dayList = entries[dateKey] || [];
   const [editKey, setEditKey] = useState(null);
@@ -191,6 +236,21 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
           <ChevronRight size={20} className="text-stone-200" />
         </IconBtn>
       </div>
+
+      <div className="flex gap-1.5 px-4 pt-3 pb-1">
+        {["WORK", "SICK", "VACATION"].map((s) => (
+          <button key={s} type="button" onClick={() => setDayStatus(dateKey, s === "WORK" ? null : { status: s })}
+            className={`flex-1 py-1.5 text-sm border ${status === s ? "bg-emerald-950 text-stone-100 border-emerald-950" : "border-stone-300 text-stone-600"}`}>
+            {DAY_STATUS_LABELS[s]}
+          </button>
+        ))}
+      </div>
+      {status !== "WORK" && (
+        <p className="px-4 pb-2 text-xs text-amber-700">
+          Als „{DAY_STATUS_LABELS[status]}“ markiert – zählt nicht als Ist-Arbeitszeit, wird aber bei der
+          Soll-Erfüllung angerechnet.
+        </p>
+      )}
 
       {showGrid && (
         <div className="border-t border-stone-300">
@@ -364,7 +424,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
 
 /* ---------------------------------- Auswertung ---------------------------------- */
 
-function AuswertungView({ entries }) {
+function AuswertungView({ entries, templates, dayStatus, employment }) {
   const [mode, setMode] = useState("week");
   const [anchor, setAnchor] = useState(new Date());
   const [customFrom, setCustomFrom] = useState(toISODate(startOfWeek(new Date())));
@@ -384,8 +444,8 @@ function AuswertungView({ entries }) {
     return { from, to, label: `${fmtDateShort(from)} – ${fmtDateShort(to)}` };
   }, [mode, anchor, customFrom, customTo]);
 
-  const { total, byActivity, rows } = useMemo(() => {
-    let total = 0;
+  const { actual, target, creditedAbsence, byActivity, rows } = useMemo(() => {
+    let actual = 0;
     const byActivity = {};
     const rows = [];
     Object.keys(entries).forEach((dateKey) => {
@@ -396,13 +456,30 @@ function AuswertungView({ entries }) {
         const dur = durationOf(e);
         rows.push({ date: dateKey, ...e, dur });
         if (isWorkEntry(e)) {
-          total += dur;
+          actual += dur;
           byActivity[e.activity] = (byActivity[e.activity] || 0) + dur;
         }
       });
     });
-    return { total, byActivity, rows };
-  }, [entries, range]);
+
+    // Soll und anrechenbare Abwesenheit (Krankheit/Urlaub) werden Tag für Tag über den Zeitraum ermittelt,
+    // unabhängig von den erfassten Einträgen (siehe dailyTargetMinutes).
+    let target = 0;
+    let creditedAbsence = 0;
+    let cursor = new Date(range.from.getFullYear(), range.from.getMonth(), range.from.getDate());
+    const last = new Date(range.to.getFullYear(), range.to.getMonth(), range.to.getDate());
+    while (cursor <= last) {
+      const dayTarget = dailyTargetMinutes(templates, employment, cursor);
+      target += dayTarget;
+      if (dayStatusOf(dayStatus, cursor) !== "WORK") creditedAbsence += dayTarget;
+      cursor = addDays(cursor, 1);
+    }
+
+    return { actual, target, creditedAbsence, byActivity, rows };
+  }, [entries, range, templates, dayStatus, employment]);
+
+  const effective = actual + creditedAbsence;
+  const difference = effective - target;
 
   const activityList = Object.entries(byActivity).sort((a, b) => b[1] - a[1]);
   const maxVal = activityList.length ? activityList[0][1] : 1;
@@ -453,9 +530,25 @@ function AuswertungView({ entries }) {
         </div>
       )}
 
-      <div className="border-t border-b border-stone-300 px-4 py-5 bg-stone-50">
-        <div className="text-xs uppercase tracking-wide text-stone-400">Gesamte Arbeitszeit</div>
-        <div className="font-serif text-3xl text-stone-800 mt-1 tabular-nums">{fmtDur(total)}</div>
+      <div className="border-t border-b border-stone-300 px-4 py-5 bg-stone-50 grid grid-cols-2 gap-4">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-stone-400">Tatsächlich gearbeitet</div>
+          <div className="font-serif text-2xl text-stone-800 mt-1 tabular-nums">{fmtDur(actual)}</div>
+        </div>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-stone-400">Soll</div>
+          <div className="font-serif text-2xl text-stone-800 mt-1 tabular-nums">{fmtDur(target)}</div>
+        </div>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-stone-400">Krankheit / Urlaub</div>
+          <div className="font-serif text-2xl text-stone-800 mt-1 tabular-nums">{fmtDur(creditedAbsence)}</div>
+        </div>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-stone-400">Bilanz</div>
+          <div className={`font-serif text-2xl mt-1 tabular-nums ${difference < 0 ? "text-rose-700" : "text-emerald-800"}`}>
+            {difference >= 0 ? "+" : "−"}{fmtDur(Math.abs(difference))}
+          </div>
+        </div>
       </div>
 
       <div className="px-4 py-3 space-y-3">
@@ -539,8 +632,12 @@ function TemplateEditor({ template, config, onChange, onClose }) {
 
 /* ---------------------------------- Einstellungen ---------------------------------- */
 
-function EinstellungenView({ config, setConfig, templates, setTemplates, holidaySettings, setHolidaySettings, entries, setEntries, resetAll }) {
+function EinstellungenView({ config, setConfig, templates, setTemplates, holidaySettings, setHolidaySettings, entries, setEntries, dayStatus, setDayStatus, resetAll }) {
   const [newActivity, setNewActivity] = useState("");
+  const employment = config.employment;
+  const setEmployment = (patch) => setConfig({ ...config, employment: { ...employment, ...patch } });
+  const weeklyTargetMinutes = effectiveWeeklyTargetMinutes(employment);
+  const useIndividualTarget = employment.individualWeeklyTargetMinutes != null;
   const [confirmReset, setConfirmReset] = useState(false);
   const [activeTemplateId, setActiveTemplateId] = useState(null);
   const [loadingHolidays, setLoadingHolidays] = useState(false);
@@ -687,7 +784,7 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
   };
 
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ config, templates, holidaySettings, entries }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ config, templates, holidaySettings, entries, dayStatus }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = `pensum_backup_${toISODate(new Date())}.json`; a.click();
@@ -705,6 +802,7 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
         if (data.templates) setTemplates(data.templates);
         if (data.holidaySettings) setHolidaySettings(data.holidaySettings);
         if (data.entries) setEntries(data.entries);
+        if (data.dayStatus) setDayStatus(data.dayStatus);
         setImportMsg("Daten erfolgreich importiert.");
       } catch (err) {
         setImportMsg("Datei konnte nicht gelesen werden – ist es eine gültige Pensum-Sicherung?");
@@ -735,6 +833,79 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
         <button onClick={addPeriod} className="mt-2 flex items-center gap-1.5 text-sm text-emerald-800">
           <Plus size={15} /> Stunde hinzufügen
         </button>
+      </section>
+
+      <section>
+        <h3 className="font-serif text-base text-stone-800 mb-1">Arbeitszeitmodell</h3>
+        <p className="text-xs text-stone-500 mb-3">
+          Bestimmt deine wöchentliche Soll-Arbeitszeit. Sie wird auf die Wochentage verteilt – an Tagen mit mehr
+          geplanten Schulstunden entsprechend mehr, an unterrichtsfreien Werktagen entsprechend weniger.
+        </p>
+
+        <label className="block text-xs text-stone-500 mb-3">
+          Beschäftigungsumfang (%)
+          <input type="number" min="1" max="100" value={employment.percentage} disabled={useIndividualTarget}
+            onChange={(e) => setEmployment({ percentage: Math.max(1, Math.min(100, Number(e.target.value) || 0)) })}
+            className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums disabled:bg-stone-100 disabled:text-stone-400" />
+        </label>
+
+        <label className="block text-xs text-stone-500 mb-3">
+          Vollzeit-Wochenreferenz
+          <div className="mt-0.5 flex items-center gap-2">
+            <input type="number" min="0" disabled={useIndividualTarget}
+              value={Math.floor(employment.fullTimeWeeklyReferenceMinutes / 60)}
+              onChange={(e) => {
+                const h = Math.max(0, Number(e.target.value) || 0);
+                setEmployment({ fullTimeWeeklyReferenceMinutes: h * 60 + (employment.fullTimeWeeklyReferenceMinutes % 60) });
+              }}
+              className="w-20 border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums disabled:bg-stone-100 disabled:text-stone-400" />
+            <span className="text-stone-400 text-sm">Std</span>
+            <input type="number" min="0" max="59" disabled={useIndividualTarget}
+              value={employment.fullTimeWeeklyReferenceMinutes % 60}
+              onChange={(e) => {
+                const m = Math.max(0, Math.min(59, Number(e.target.value) || 0));
+                setEmployment({ fullTimeWeeklyReferenceMinutes: Math.floor(employment.fullTimeWeeklyReferenceMinutes / 60) * 60 + m });
+              }}
+              className="w-20 border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums disabled:bg-stone-100 disabled:text-stone-400" />
+            <span className="text-stone-400 text-sm">Min</span>
+          </div>
+          <span className="block mt-1 text-xs text-stone-400">
+            Der Standardwert 46:38 h orientiert sich am niedersächsischen Referenzmodell und ist kein allgemeingültiger
+            gesetzlicher Wert – frei änderbar.
+          </span>
+        </label>
+
+        <label className="flex items-center gap-2 text-xs text-stone-500 mb-2">
+          <input type="checkbox" checked={useIndividualTarget}
+            onChange={(e) => setEmployment({ individualWeeklyTargetMinutes: e.target.checked ? weeklyTargetMinutes : null })} />
+          Eigene Wochen-Sollzeit statt Beschäftigungsumfang verwenden
+        </label>
+
+        {useIndividualTarget && (
+          <label className="block text-xs text-stone-500 mb-3">
+            Individuelle Wochen-Sollzeit
+            <div className="mt-0.5 flex items-center gap-2">
+              <input type="number" min="0" value={Math.floor(employment.individualWeeklyTargetMinutes / 60)}
+                onChange={(e) => {
+                  const h = Math.max(0, Number(e.target.value) || 0);
+                  setEmployment({ individualWeeklyTargetMinutes: h * 60 + (employment.individualWeeklyTargetMinutes % 60) });
+                }}
+                className="w-20 border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums" />
+              <span className="text-stone-400 text-sm">Std</span>
+              <input type="number" min="0" max="59" value={employment.individualWeeklyTargetMinutes % 60}
+                onChange={(e) => {
+                  const m = Math.max(0, Math.min(59, Number(e.target.value) || 0));
+                  setEmployment({ individualWeeklyTargetMinutes: Math.floor(employment.individualWeeklyTargetMinutes / 60) * 60 + m });
+                }}
+                className="w-20 border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums" />
+              <span className="text-stone-400 text-sm">Min</span>
+            </div>
+          </label>
+        )}
+
+        <p className="text-xs text-stone-600">
+          Aktuelles Wochen-Soll: <span className="tabular-nums font-medium">{fmtDur(weeklyTargetMinutes)}</span>
+        </p>
       </section>
 
       <section>
@@ -878,10 +1049,15 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
 /* ---------------------------------- App ---------------------------------- */
 
 export default function App() {
-  const [config, setConfigState] = useState(() => loadJSON("config", { periods: DEFAULT_PERIODS, activities: DEFAULT_ACTIVITIES }));
+  const [config, setConfigState] = useState(() => {
+    const loaded = loadJSON("config", DEFAULT_CONFIG);
+    // Bestehende gespeicherte Configs kennen `employment` ggf. noch nicht – additiv ergänzen.
+    return { ...DEFAULT_CONFIG, ...loaded, employment: { ...DEFAULT_EMPLOYMENT, ...(loaded.employment || {}) } };
+  });
   const [templates, setTemplatesState] = useState(() => loadJSON("templates", []));
   const [holidaySettings, setHolidaySettingsState] = useState(() => loadJSON("holidays", { bundesland: "NW", holidays: [] }));
   const [entries, setEntriesState] = useState(() => loadJSON("entries", {}));
+  const [dayStatus, setDayStatusState] = useState(() => loadJSON("dayStatus", {}));
   const [tab, setTab] = useState("tag");
   const [date, setDate] = useState(new Date());
 
@@ -889,16 +1065,23 @@ export default function App() {
   const setTemplates = (next) => { setTemplatesState(next); saveJSON("templates", next); };
   const setHolidaySettings = (next) => { setHolidaySettingsState(next); saveJSON("holidays", next); };
   const setEntries = (next) => { setEntriesState(next); saveJSON("entries", next); };
+  const setDayStatus = (next) => { setDayStatusState(next); saveJSON("dayStatus", next); };
   const setDayEntries = (dateKey, list) => {
     const next = { ...entries };
     if (list.length) next[dateKey] = list; else delete next[dateKey];
     setEntries(next);
   };
+  const setDayStatusFor = (dateKey, value) => {
+    const next = { ...dayStatus };
+    if (value) next[dateKey] = value; else delete next[dateKey];
+    setDayStatus(next);
+  };
   const resetAll = () => {
-    setConfig({ periods: DEFAULT_PERIODS, activities: DEFAULT_ACTIVITIES });
+    setConfig(DEFAULT_CONFIG);
     setTemplates([]);
     setHolidaySettings({ bundesland: "NW", holidays: [] });
     setEntries({});
+    setDayStatus({});
   };
 
   const tabs = [
@@ -915,15 +1098,20 @@ export default function App() {
       </div>
 
       {tab === "tag" && (
-        <TagView date={date} setDate={setDate} entries={entries} setDayEntries={setDayEntries} config={config} templates={templates} holidays={holidaySettings.holidays} />
+        <TagView date={date} setDate={setDate} entries={entries} setDayEntries={setDayEntries} config={config}
+          templates={templates} holidays={holidaySettings.holidays} dayStatus={dayStatus} setDayStatus={setDayStatusFor} />
       )}
-      {tab === "auswertung" && <AuswertungView entries={entries} />}
+      {tab === "auswertung" && (
+        <AuswertungView entries={entries} templates={templates} dayStatus={dayStatus} employment={config.employment} />
+      )}
       {tab === "einstellungen" && (
         <EinstellungenView
           config={config} setConfig={setConfig}
           templates={templates} setTemplates={setTemplates}
           holidaySettings={holidaySettings} setHolidaySettings={setHolidaySettings}
-          entries={entries} setEntries={setEntries} resetAll={resetAll}
+          entries={entries} setEntries={setEntries}
+          dayStatus={dayStatus} setDayStatus={setDayStatus}
+          resetAll={resetAll}
         />
       )}
 

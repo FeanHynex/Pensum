@@ -1,6 +1,6 @@
 # Pensum – Technische Architektur
 
-Stand: 03.09.2026
+Stand: 03.09.2026 (mit Ergänzung: Soll-/Ist-/Abwesenheitsmodell)
 
 ## 1. Architekturprinzip
 
@@ -104,10 +104,11 @@ Die Komponenten sind derzeit alle in `src/App.jsx` definiert.
 
 Verwaltet den globalen Anwendungszustand:
 
-- `config`
+- `config` (inkl. `config.employment` – Arbeitszeitmodell)
 - `templates`
 - `holidaySettings`
 - `entries`
+- `dayStatus` (Tages-Status: Krank/Urlaub)
 - aktuell gewählter Tab
 - aktuell gewähltes Datum
 
@@ -124,8 +125,10 @@ Sie erhält unter anderem:
 - `config`
 - `templates`
 - `holidays`
+- `dayStatus`
 
-und verwendet `setDayEntries()` zum Speichern der Tagesdaten.
+und verwendet `setDayEntries()` zum Speichern der Tagesdaten sowie `setDayStatus(dateKey, value)` zum Setzen bzw.
+(bei `value = null`) Löschen des Tages-Status. `value` ist entweder `null` (= Status `WORK`) oder `{ status: "SICK" | "VACATION" }`.
 
 ### `EntryForm`
 
@@ -141,7 +144,9 @@ Gemeinsames Formular für:
 
 ### `AuswertungView`
 
-Ermittelt anhand von `entries` einen Zeitraum und aggregiert Arbeitszeiten.
+Ermittelt anhand von `entries` einen Zeitraum und aggregiert die Ist-Arbeitszeit. Berechnet zusätzlich anhand von
+`templates`, `dayStatus` und `employment` die Soll-Arbeitszeit und die anrechenbare Abwesenheitszeit des Zeitraums
+(siehe Abschnitt 12a).
 
 ### `TemplateEditor`
 
@@ -152,10 +157,11 @@ Bearbeitet eine Stundenplan-Vorlage mit Zeitraum und Einträgen je Wochentag/Stu
 Verwaltet:
 
 - Schulstunden
+- Arbeitszeitmodell (`config.employment`: Beschäftigungsumfang, Vollzeit-Wochenreferenz, individuelle Wochen-Sollzeit)
 - Stundenplan-Vorlagen
 - Ferien
 - Tätigkeiten
-- Datenexport/-import
+- Datenexport/-import (inkl. `dayStatus`)
 - Zurücksetzen
 
 ## 5. State- und Datenfluss
@@ -180,7 +186,7 @@ Die Daten werden nicht über einen globalen Context oder Redux verwaltet.
 
 ## 6. Persistente Daten
 
-Es existieren vier logische Speicherbereiche:
+Es existieren fünf logische Speicherbereiche:
 
 ### `config`
 
@@ -190,8 +196,15 @@ config
 │   ├── nr
 │   ├── start
 │   └── end
-└── activities[]
+├── activities[]
+└── employment
+    ├── percentage                        (Beschäftigungsumfang in %)
+    ├── fullTimeWeeklyReferenceMinutes     (Vollzeit-Wochenreferenz in Minuten)
+    └── individualWeeklyTargetMinutes      (optionale individuelle Wochen-Sollzeit, überschreibt percentage)
 ```
+
+`config.employment` wird beim Laden aus `localStorage` additiv mit Standardwerten zusammengeführt (siehe `App`), damit
+ältere gespeicherte Configs ohne dieses Feld weiterhin funktionieren.
 
 ### `templates`
 
@@ -248,6 +261,16 @@ entries
         ├── activity
         └── note
 ```
+
+### `dayStatus`
+
+```text
+dayStatus
+└── YYYY-MM-DD
+    └── status   ("SICK" | "VACATION")
+```
+
+Nur Tage mit Abwesenheitsstatus haben einen Eintrag. Ohne Eintrag gilt ein Datum implizit als `"WORK"`.
 
 ## 7. Eintragsarten
 
@@ -332,16 +355,21 @@ new Set(["Eigene Pause", "Ausgefallen"])
 ```text
 Datum
  │
- ├── Wochenende? ── Ja ──> kein Schulstundenraster
+ ├── Wochenende? ──────────────── Ja ──> kein Schulstundenraster
  │
- ├── Ferien? ───── Ja ──> kein Schulstundenraster
+ ├── Ferien? ──────────────────── Ja ──> kein Schulstundenraster
  │
- └── sonst ─────────────> Schulstundenraster
-                              │
-                              ├── vorhandener Eintrag
-                              ├── geplante Vorlage
-                              └── leer
+ ├── Status "Krank"/"Urlaub"? ─── Ja ──> kein Schulstundenraster
+ │
+ └── sonst ─────────────────────────────> Schulstundenraster
+                                              │
+                                              ├── vorhandener Eintrag
+                                              ├── geplante Vorlage
+                                              └── leer
 ```
+
+Der Tages-Status wird über `dayStatusOf(dayStatus, date)` ermittelt und ist unabhängig von Wochenende/Ferien. Freie
+Einträge bleiben in allen drei "kein Schulstundenraster"-Fällen weiterhin möglich.
 
 Zwischen zwei Schulstunden wird aus der Differenz von `p.end` und `next.start` ein optionaler Pausenslot erzeugt.
 
@@ -431,11 +459,42 @@ falls isWorkEntry()
 
 Die Detailzeilen werden zusätzlich für den CSV-Export gesammelt.
 
+## 12a. Soll-Arbeitszeit und Anrechnung (Arbeitszeitmodell)
+
+Zusätzlich zur Ist-Arbeitszeit berechnet `AuswertungView` für denselben Zeitraum:
+
+```text
+für jeden Tag im Zeitraum:
+    dayTarget = dailyTargetMinutes(templates, employment, tag)
+    target += dayTarget
+    falls dayStatusOf(dayStatus, tag) != "WORK":
+        creditedAbsence += dayTarget
+
+effective = actual + creditedAbsence
+difference = effective - target
+```
+
+`dailyTargetMinutes()`:
+
+```text
+Wochenende? ──> 0
+
+effektives Wochensoll = effectiveWeeklyTargetMinutes(employment)
+    (individualWeeklyTargetMinutes falls gesetzt, sonst fullTimeWeeklyReferenceMinutes × percentage / 100)
+
+aktive Stundenplan-Vorlage für den Tag vorhanden und enthält geplante Stunden?
+    ├── Ja ──> Wochensoll × (geplante Stunden an diesem Wochentag / geplante Stunden gesamt Mo–Fr in der Vorlage)
+    └── Nein ─> Wochensoll / 5
+```
+
+Diese Berechnung ist unabhängig von den tatsächlich erfassten Einträgen (`entries`) und von Ferien/Feiertagen – sie
+iteriert rein über Kalendertage und die für das jeweilige Datum aktive Stundenplan-Vorlage.
+
 ## 13. Import/Export
 
 ### JSON
 
-Der JSON-Export speichert den kompletten aktuellen App-Zustand.
+Der JSON-Export speichert den kompletten aktuellen App-Zustand, inklusive `dayStatus`.
 
 Der Import setzt die vorhandenen Bereiche nur dann, wenn der entsprechende Schlüssel in der Datei vorhanden ist.
 
