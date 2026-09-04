@@ -2,6 +2,16 @@
 
 Alle Einträge beziehen sich auf den Stand des GitHub-Projekts. Die Datei soll bei relevanten zukünftigen Änderungen durch die bearbeitende KI ergänzt werden.
 
+## 2026-09-04 (2)
+
+### Fix
+
+- `color-scheme` (Meta-Tag in `index.html` + CSS-Regel je nach `dark`-Klasse) ergänzt. Ohne dieses Signal haben
+  manche Browser die Seite trotz ausgewähltem „Hell"-Modus per eigener automatischer „Force Dark"-Funktion
+  abgedunkelt, wobei native Formularelemente (`<input type="time">` etc.) weiß und dadurch nahezu unlesbar
+  blieben. Zusätzlich sorgt `color-scheme` dafür, dass native Steuerelemente und Scrollbars automatisch zum
+  jeweils aktiven Modus passen.
+
 ## 2026-09-04
 
 ### Funktionalität

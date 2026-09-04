@@ -574,6 +574,12 @@ Modi unverändert, da ihr Kontrast bereits ausreicht.
 Bei künftigen Änderungen an Farben in `src/App.jsx` sollte für neue helle Flächen/Texte/Ränder jeweils eine
 passende `dark:`-Variante ergänzt werden, damit der Darkmode konsistent bleibt.
 
+Zusätzlich wird `color-scheme` gesetzt (`<meta name="color-scheme" content="light dark">` in `index.html` sowie
+`html { color-scheme: light }` / `html.dark { color-scheme: dark }` in `src/index.css`). Das ist erforderlich,
+damit (a) native Formularelemente (`<input type="time">`/`date`/`number`, Scrollbars) im jeweiligen Modus
+passend eingefärbt werden und (b) manche Browser die Seite nicht ungefragt per eigener „Force Dark"-Heuristik
+abdunkeln, was sonst zu Kontrastfehlern führt (z. B. weiße native Inputs auf sonst dunkel gerendertem Hintergrund).
+
 ## 15. Deployment
 
 GitHub Actions:
