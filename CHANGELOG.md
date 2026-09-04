@@ -2,6 +2,27 @@
 
 Alle Einträge beziehen sich auf den Stand des GitHub-Projekts. Die Datei soll bei relevanten zukünftigen Änderungen durch die bearbeitende KI ergänzt werden.
 
+## 2026-09-04
+
+### Funktionalität
+
+- Darkmode hinzugefügt. In den Einstellungen unter „Design“ ist der Anzeigemodus „Hell“, „Dunkel“ oder „System“
+  wählbar. Bei „System“ folgt die App automatisch der Geräte-Einstellung (`prefers-color-scheme`) und reagiert
+  auch zur Laufzeit auf deren Änderung.
+- Die Wahl wird lokal gespeichert (`localStorage`-Key `theme`) und bleibt über App-Neustarts erhalten.
+
+### Technisch
+
+- Tailwind auf klassenbasierten Darkmode umgestellt (`darkMode: "class"`). Die `dark`-Klasse wird per `useEffect`
+  in `App` auf `document.documentElement` gesetzt/entfernt.
+- Farbklassen in `src/App.jsx` wurden durchgängig um passende `dark:`-Varianten ergänzt (Hintergründe, Text- und
+  Rahmenfarben). Die dunklen Kopf-/Fußleisten (`bg-emerald-950`) sowie reine Akzent-/Auswahl-Elemente bleiben
+  unverändert, da sie in beiden Modi ausreichend Kontrast bieten.
+
+### Dokumentation
+
+- `AI_CONTEXT.md` und `ARCHITECTURE.md` um den Darkmode/Theme-Mechanismus ergänzt.
+
 ## 2026-09-03 (3)
 
 ### Fehlerbehebungen

@@ -1,6 +1,6 @@
 # Pensum – Projektkontext für KI
 
-Stand: 03.09.2026 (mit Ergänzung: Soll-/Ist-/Abwesenheitsmodell)
+Stand: 04.09.2026 (mit Ergänzung: Darkmode)
 
 ## 1. Projekt
 
@@ -54,9 +54,26 @@ Die App besitzt aktuell drei Hauptbereiche:
 
 1. **Tag** – Erfassung und Bearbeitung von Arbeitszeiten für einen einzelnen Tag.
 2. **Auswertung** – Auswertung nach Tag, Woche, Monat oder frei gewähltem Zeitraum.
-3. **Einstellungen** – Stundenraster, Stundenplan-Vorlagen, Ferien, Tätigkeiten und Datensicherung.
+3. **Einstellungen** – Design (Hell/Dunkel/System), Stundenraster, Stundenplan-Vorlagen, Ferien, Tätigkeiten und
+   Datensicherung.
 
 Die Oberfläche ist auf eine schmale, mobile Darstellung ausgelegt (`max-w-md`) und verwendet überwiegend Tailwind-Klassen.
+
+### Design-Modus (Darkmode)
+
+Die App unterstützt einen hellen und einen dunklen Anzeigemodus sowie einen automatischen Modus, der der
+Geräte-Einstellung folgt:
+
+- Auswahl in den Einstellungen unter „Design“: `light` (Hell), `dark` (Dunkel) oder `system` (Standard).
+- Der gewählte Modus wird als einfacher String unter dem `localStorage`-Key `theme` gespeichert.
+- Bei `system` wird die tatsächliche Darstellung aus `window.matchMedia("(prefers-color-scheme: dark)")`
+  abgeleitet; Änderungen dieser Geräte-Einstellung zur Laufzeit werden per Event-Listener übernommen, ohne dass
+  die App neu geladen werden muss.
+- Technisch basiert dies auf Tailwinds klassenbasiertem Darkmode (`darkMode: "class"` in `tailwind.config.js`):
+  `App` setzt/entfernt die Klasse `dark` auf `document.documentElement`, wodurch alle `dark:`-Tailwind-Varianten
+  im Markup greifen.
+- Der Design-Modus ist eine Geräte-/Anzeigeeinstellung, keine Arbeitszeitdaten – er wird beim „Alle Daten
+  zurücksetzen“ bewusst **nicht** mit zurückgesetzt und ist nicht Teil des JSON-Exports/-Imports.
 
 ## 5. Tageserfassung
 
@@ -221,6 +238,8 @@ Aktuelle Speicher-Keys:
 - `holidays`
 - `entries`
 - `dayStatus`
+- `theme` (Design-Modus: `"light" | "dark" | "system"`, siehe Abschnitt 4 „Design-Modus (Darkmode)“; kein Teil des
+  Arbeitszeit-Datenmodells, daher nicht im JSON-Export enthalten)
 
 `src/storage.js` stellt dafür `loadJSON()` und `saveJSON()` bereit.
 

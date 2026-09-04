@@ -1,6 +1,6 @@
 # Pensum – Technische Architektur
 
-Stand: 03.09.2026 (mit Ergänzung: Soll-/Ist-/Abwesenheitsmodell)
+Stand: 04.09.2026 (mit Ergänzung: Darkmode)
 
 ## 1. Architekturprinzip
 
@@ -109,10 +109,17 @@ Verwaltet den globalen Anwendungszustand:
 - `holidaySettings`
 - `entries`
 - `dayStatus` (Tages-Status: Krank/Urlaub)
+- `theme` (Design-Modus: `"light" | "dark" | "system"`)
 - aktuell gewählter Tab
 - aktuell gewähltes Datum
 
 Außerdem verbindet `App` React-State und `localStorage`.
+
+Zusätzlich enthält `App` einen `useEffect`, der abhängig von `theme` die Klasse `dark` auf
+`document.documentElement` setzt bzw. entfernt. Bei `theme === "system"` wird der aktuelle Wert von
+`window.matchMedia("(prefers-color-scheme: dark)")` herangezogen und ein `change`-Listener registriert, damit ein
+Wechsel der Geräte-Einstellung ohne Neuladen der App übernommen wird; der Listener wird beim Verlassen des
+`system`-Modus bzw. beim Unmount wieder entfernt.
 
 ### `TagView`
 
@@ -163,13 +170,15 @@ Bearbeitet eine Stundenplan-Vorlage mit Zeitraum und Einträgen je Wochentag/Stu
 
 Verwaltet:
 
+- Design-Modus (Hell/Dunkel/System) über die von `App` durchgereichten Props `theme`/`setTheme`
 - Schulstunden
 - Arbeitszeitmodell (`config.employment`: Beschäftigungsumfang, Vollzeit-Wochenreferenz, individuelle Wochen-Sollzeit)
 - Stundenplan-Vorlagen
 - Ferien
 - Tätigkeiten
-- Datenexport/-import (inkl. `dayStatus`)
-- Zurücksetzen
+- Datenexport/-import (inkl. `dayStatus`, aber **ohne** `theme` – der Design-Modus ist eine reine
+  Anzeigeeinstellung des Geräts/Browsers, kein Arbeitszeit-Datum)
+- Zurücksetzen (`resetAll` setzt ausdrücklich nicht `theme` zurück)
 
 ## 5. State- und Datenfluss
 
@@ -193,7 +202,7 @@ Die Daten werden nicht über einen globalen Context oder Redux verwaltet.
 
 ## 6. Persistente Daten
 
-Es existieren fünf logische Speicherbereiche:
+Es existieren sechs logische Speicherbereiche:
 
 ### `config`
 
@@ -281,6 +290,16 @@ dayStatus
 
 Nur Tage mit Abwesenheitsstatus haben einen Eintrag. Ohne Eintrag gilt ein Datum implizit als `"WORK"`. `from` und
 `to` schließen sich gegenseitig aus; sind beide nicht gesetzt, gilt der ganze Tag als abwesend.
+
+### `theme`
+
+```text
+theme: "light" | "dark" | "system"
+```
+
+Einfacher String (kein Objekt), ebenfalls über `loadJSON`/`saveJSON` gespeichert. Fehlt der Key, gilt `"system"`
+als Default. Kein Bestandteil von `entries`/`config`/etc. und daher bewusst außerhalb von JSON-Export/-Import und
+`resetAll()` gehalten, da es sich um eine Geräte-/Anzeigeeinstellung handelt, nicht um Arbeitszeitdaten.
 
 ## 7. Eintragsarten
 
@@ -537,10 +556,23 @@ Tailwind CSS wird über `src/index.css` eingebunden.
 Globale Basis:
 
 - `html`, `body`, `#root` volle Höhe
-- Hintergrund `#f5f5f4`
+- Hintergrund `#f5f5f4` (hell); bei aktivem Darkmode (`html.dark`) `#0c0a09` (dunkel)
 - mobile Tap-Hervorhebung deaktiviert
 
 Das konkrete Design befindet sich überwiegend direkt in JSX über Tailwind-Klassen.
+
+### Darkmode
+
+`tailwind.config.js` verwendet `darkMode: "class"`. Ob die Klasse `dark` auf `document.documentElement` gesetzt
+ist, wird zur Laufzeit in `App` anhand des `theme`-States (`"light" | "dark" | "system"`) entschieden (siehe
+Abschnitt 4). Farbbezogene Tailwind-Klassen im gesamten `src/App.jsx` besitzen dafür durchgängig passende
+`dark:`-Geschwistervarianten (z. B. `text-stone-800 dark:text-stone-100`, `border-stone-300
+dark:border-stone-700`, `bg-white dark:bg-stone-800`). Ausgenommen sind bewusst dunkel gehaltene Flächen wie die
+Kopf-/Fußleiste (`bg-emerald-950`) sowie einzelne gefüllte Akzent-/Auswahl-Buttons – diese bleiben in beiden
+Modi unverändert, da ihr Kontrast bereits ausreicht.
+
+Bei künftigen Änderungen an Farben in `src/App.jsx` sollte für neue helle Flächen/Texte/Ränder jeweils eine
+passende `dark:`-Variante ergänzt werden, damit der Darkmode konsistent bleibt.
 
 ## 15. Deployment
 

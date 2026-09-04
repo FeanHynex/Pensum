@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Calendar, BarChart3, Settings, Plus, Check, X, Trash2,
-  ChevronLeft, ChevronRight, Coffee, Download, Upload, Pencil, Loader2
+  ChevronLeft, ChevronRight, Coffee, Download, Upload, Pencil, Loader2,
+  Sun, Moon, Monitor
 } from "lucide-react";
 import { loadJSON, saveJSON } from "./storage.js";
 
@@ -50,6 +51,11 @@ const DEFAULT_EMPLOYMENT = {
 const DEFAULT_CONFIG = { periods: DEFAULT_PERIODS, activities: DEFAULT_ACTIVITIES, employment: DEFAULT_EMPLOYMENT };
 
 const DAY_STATUS_LABELS = { WORK: "Arbeit", SICK: "Krank", VACATION: "Urlaub" };
+
+// Design-Modus: "light" | "dark" | "system". Bei "system" folgt die App der Geräte-Einstellung
+// (prefers-color-scheme) und reagiert auch auf deren Änderung zur Laufzeit.
+const THEME_LABELS = { light: "Hell", dark: "Dunkel", system: "System" };
+const THEME_ICONS = { light: Sun, dark: Moon, system: Monitor };
 
 /* ---------------------------------- Helfer ---------------------------------- */
 
@@ -139,10 +145,10 @@ const dayAbsenceFraction = (config, statusEntry) => {
 
 function IconBtn({ onClick, children, title, tone = "default" }) {
   const tones = {
-    default: "text-stone-500 hover:text-stone-800 hover:bg-stone-200",
-    danger: "text-rose-700 hover:bg-rose-100",
-    good: "text-emerald-700 hover:bg-emerald-100",
-    warn: "text-amber-700 hover:bg-amber-100",
+    default: "text-stone-500 dark:text-stone-400 hover:text-stone-800 dark:hover:text-stone-100 hover:bg-stone-200 dark:hover:bg-stone-700",
+    danger: "text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-950",
+    good: "text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-950",
+    warn: "text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-950",
   };
   return (
     <button type="button" onClick={onClick} title={title} className={`p-1.5 shrink-0 ${tones[tone]}`}>
@@ -159,39 +165,39 @@ function EntryForm({ initial, activities, onSave, onCancel, onDelete }) {
   const valid = toMin(end) > toMin(start);
 
   return (
-    <div className="bg-stone-50 border border-stone-300 p-3 space-y-2">
+    <div className="bg-stone-50 dark:bg-stone-900 border border-stone-300 dark:border-stone-700 p-3 space-y-2">
       <div className="flex gap-2">
-        <label className="flex-1 text-xs text-stone-500">
+        <label className="flex-1 text-xs text-stone-500 dark:text-stone-400">
           Start
           <input type="time" value={start} onChange={(e) => setStart(e.target.value)}
-            className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums text-stone-800" />
+            className="mt-0.5 w-full border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm tabular-nums text-stone-800 dark:text-stone-100" />
         </label>
-        <label className="flex-1 text-xs text-stone-500">
+        <label className="flex-1 text-xs text-stone-500 dark:text-stone-400">
           Ende
           <input type="time" value={end} onChange={(e) => setEnd(e.target.value)}
-            className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums text-stone-800" />
+            className="mt-0.5 w-full border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm tabular-nums text-stone-800 dark:text-stone-100" />
         </label>
       </div>
-      {!valid && <p className="text-xs text-rose-700">Ende muss nach dem Start liegen.</p>}
-      <label className="block text-xs text-stone-500">
+      {!valid && <p className="text-xs text-rose-700 dark:text-rose-400">Ende muss nach dem Start liegen.</p>}
+      <label className="block text-xs text-stone-500 dark:text-stone-400">
         Tätigkeit
         <select value={activity} onChange={(e) => setActivity(e.target.value)}
-          className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-800">
+          className="mt-0.5 w-full border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm text-stone-800 dark:text-stone-100">
           {activities.map((a) => <option key={a} value={a}>{a}</option>)}
         </select>
       </label>
-      <label className="block text-xs text-stone-500">
+      <label className="block text-xs text-stone-500 dark:text-stone-400">
         Bemerkung (optional)
         <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="z. B. Hof, Klasse 8a …"
-          className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-800" />
+          className="mt-0.5 w-full border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm text-stone-800 dark:text-stone-100" />
       </label>
       <div className="flex items-center gap-2 pt-1">
         <button type="button" disabled={!valid}
           onClick={() => onSave({ start, end, activity, note: note.trim() })}
-          className="flex-1 bg-emerald-800 disabled:bg-stone-300 disabled:text-stone-500 text-stone-50 text-sm py-2 flex items-center justify-center gap-1.5">
+          className="flex-1 bg-emerald-800 disabled:bg-stone-300 dark:disabled:bg-stone-700 disabled:text-stone-500 dark:disabled:text-stone-400 text-stone-50 text-sm py-2 flex items-center justify-center gap-1.5">
           <Check size={15} /> Speichern
         </button>
-        <button type="button" onClick={onCancel} className="px-3 py-2 border border-stone-300 text-sm text-stone-600">
+        <button type="button" onClick={onCancel} className="px-3 py-2 border border-stone-300 dark:border-stone-700 text-sm text-stone-600 dark:text-stone-400">
           Abbrechen
         </button>
         {onDelete && <IconBtn onClick={onDelete} title="Löschen" tone="danger"><Trash2 size={17} /></IconBtn>}
@@ -276,7 +282,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
       <div className="flex gap-1.5 px-4 pt-3 pb-1">
         {["WORK", "SICK", "VACATION"].map((s) => (
           <button key={s} type="button" onClick={() => setDayStatus(dateKey, s === "WORK" ? null : { status: s })}
-            className={`flex-1 py-1.5 text-sm border ${status === s ? "bg-emerald-950 text-stone-100 border-emerald-950" : "border-stone-300 text-stone-600"}`}>
+            className={`flex-1 py-1.5 text-sm border ${status === s ? "bg-emerald-950 text-stone-100 border-emerald-950" : "border-stone-300 dark:border-stone-700 text-stone-600 dark:text-stone-400"}`}>
             {DAY_STATUS_LABELS[s]}
           </button>
         ))}
@@ -291,20 +297,20 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                     : m === "TO" ? { to: statusTo || "12:00", from: undefined }
                     : { from: undefined, to: undefined }
                 )}
-                className={`flex-1 py-1 text-xs border ${partialMode === m ? "bg-amber-700 text-stone-50 border-amber-700" : "border-stone-300 text-stone-500"}`}>
+                className={`flex-1 py-1 text-xs border ${partialMode === m ? "bg-amber-700 text-stone-50 border-amber-700" : "border-stone-300 dark:border-stone-700 text-stone-500 dark:text-stone-400"}`}>
                 {label}
               </button>
             ))}
           </div>
           {partialMode === "FROM" && (
             <input type="time" value={statusFrom} onChange={(e) => setStatus({ from: e.target.value })}
-              className="border border-stone-300 bg-white px-2 py-1 text-sm tabular-nums" />
+              className="border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1 text-sm tabular-nums" />
           )}
           {partialMode === "TO" && (
             <input type="time" value={statusTo} onChange={(e) => setStatus({ to: e.target.value })}
-              className="border border-stone-300 bg-white px-2 py-1 text-sm tabular-nums" />
+              className="border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1 text-sm tabular-nums" />
           )}
-          <p className="text-xs text-amber-700">
+          <p className="text-xs text-amber-700 dark:text-amber-400">
             Als „{DAY_STATUS_LABELS[status]}“
             {partialMode === "FROM" ? ` ab ${statusFrom} Uhr` : partialMode === "TO" ? ` bis ${statusTo} Uhr` : " (ganzer Tag)"}
             {" "}markiert – zählt nicht als Ist-Arbeitszeit, wird aber anteilig bei der Soll-Erfüllung angerechnet.
@@ -313,7 +319,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
       )}
 
       {showGrid && (
-        <div className="border-t border-stone-300">
+        <div className="border-t border-stone-300 dark:border-stone-700">
           {periods.map((p, i) => {
             const entry = periodEntries[p.nr];
             const templ = dayTemplate[p.nr];
@@ -329,7 +335,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
 
             return (
               <React.Fragment key={p.nr}>
-                <div className="border-b border-stone-300">
+                <div className="border-b border-stone-300 dark:border-stone-700">
                   {editing ? (
                     <div className="p-2">
                       <EntryForm
@@ -343,24 +349,24 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                   ) : entry ? (
                     <button onClick={() => setEditKey(key)}
                       className={`w-full text-left flex items-center gap-3 px-4 py-2.5 border-l-4 ${
-                        entry.activity === "Ausgefallen" ? "border-rose-700 bg-rose-50/40" : "border-emerald-700"
+                        entry.activity === "Ausgefallen" ? "border-rose-700 bg-rose-50/40 dark:bg-rose-950/30" : "border-emerald-700"
                       }`}>
-                      <div className="w-16 shrink-0 text-xs text-stone-500 tabular-nums leading-tight">
+                      <div className="w-16 shrink-0 text-xs text-stone-500 dark:text-stone-400 tabular-nums leading-tight">
                         <div>{p.nr}. Std</div>
                         <div>{entry.start}–{entry.end}</div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className={`text-sm text-stone-800 ${entry.activity === "Ausgefallen" ? "line-through text-stone-400" : ""}`}>
+                        <div className={`text-sm text-stone-800 dark:text-stone-100 ${entry.activity === "Ausgefallen" ? "line-through text-stone-400 dark:text-stone-500" : ""}`}>
                           {entry.activity}
                         </div>
-                        {entry.note && <div className="text-xs text-stone-500 truncate">{entry.note}</div>}
+                        {entry.note && <div className="text-xs text-stone-500 dark:text-stone-400 truncate">{entry.note}</div>}
                       </div>
-                      <div className="text-xs text-stone-500 tabular-nums shrink-0">
+                      <div className="text-xs text-stone-500 dark:text-stone-400 tabular-nums shrink-0">
                         {isWorkEntry(entry) ? fmtDur(durationOf(entry)) : "—"}
                       </div>
                     </button>
                   ) : periodCovered ? (
-                    <div className="flex items-center gap-3 px-4 py-2.5 border-l-4 border-amber-300 bg-amber-50/40 text-stone-400">
+                    <div className="flex items-center gap-3 px-4 py-2.5 border-l-4 border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-amber-950/30 text-stone-400 dark:text-stone-500">
                       <div className="w-16 shrink-0 text-xs tabular-nums leading-tight">
                         <div>{p.nr}. Std</div>
                         <div>{p.start}–{p.end}</div>
@@ -369,13 +375,13 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                     </div>
                   ) : templ ? (
                     <div className="flex items-center gap-3 px-4 py-2.5 border-l-4 border-dashed border-amber-500">
-                      <div className="w-16 shrink-0 text-xs text-stone-500 tabular-nums leading-tight">
+                      <div className="w-16 shrink-0 text-xs text-stone-500 dark:text-stone-400 tabular-nums leading-tight">
                         <div>{p.nr}. Std</div>
                         <div>{p.start}–{p.end}</div>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm italic text-stone-600 truncate">{templ}</div>
-                        <div className="text-xs text-amber-700">geplant · unbestätigt</div>
+                        <div className="text-sm italic text-stone-600 dark:text-stone-400 truncate">{templ}</div>
+                        <div className="text-xs text-amber-700 dark:text-amber-400">geplant · unbestätigt</div>
                       </div>
                       <div className="flex items-center">
                         <IconBtn tone="good" title="Stunde bestätigen"
@@ -390,7 +396,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                       </div>
                     </div>
                   ) : (
-                    <button onClick={() => setEditKey(key)} className="w-full flex items-center gap-3 px-4 py-2 text-stone-400 hover:bg-stone-100">
+                    <button onClick={() => setEditKey(key)} className="w-full flex items-center gap-3 px-4 py-2 text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800">
                       <div className="w-16 shrink-0 text-xs tabular-nums leading-tight">
                         <div>{p.nr}. Std</div>
                         <div>{p.start}–{p.end}</div>
@@ -402,7 +408,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                 </div>
 
                 {gap > 0 && !gapCovered && (
-                  <div className="border-b border-stone-300 bg-stone-50">
+                  <div className="border-b border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900">
                     {editKey === slotEditKey ? (
                       <div className="p-2">
                         <EntryForm
@@ -415,15 +421,15 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                       </div>
                     ) : slotEntry ? (
                       <button onClick={() => setEditKey(slotEditKey)} className="w-full flex items-center gap-3 px-4 py-1.5 pl-6 text-left">
-                        <Coffee size={13} className="text-stone-400 shrink-0" />
+                        <Coffee size={13} className="text-stone-400 dark:text-stone-500 shrink-0" />
                         <div className="flex-1 min-w-0 text-xs">
-                          <span className={isWorkEntry(slotEntry) ? "text-stone-700" : "text-stone-400"}>{slotEntry.activity}</span>
-                          <span className="text-stone-400 ml-2 tabular-nums">{slotEntry.start}–{slotEntry.end}</span>
+                          <span className={isWorkEntry(slotEntry) ? "text-stone-700 dark:text-stone-300" : "text-stone-400 dark:text-stone-500"}>{slotEntry.activity}</span>
+                          <span className="text-stone-400 dark:text-stone-500 ml-2 tabular-nums">{slotEntry.start}–{slotEntry.end}</span>
                         </div>
-                        <span className="text-xs text-stone-400 tabular-nums">{isWorkEntry(slotEntry) ? fmtDur(durationOf(slotEntry)) : "—"}</span>
+                        <span className="text-xs text-stone-400 dark:text-stone-500 tabular-nums">{isWorkEntry(slotEntry) ? fmtDur(durationOf(slotEntry)) : "—"}</span>
                       </button>
                     ) : (
-                      <button onClick={() => setEditKey(slotEditKey)} className="w-full flex items-center gap-3 px-4 py-1.5 pl-6 text-left text-stone-400 hover:bg-stone-100">
+                      <button onClick={() => setEditKey(slotEditKey)} className="w-full flex items-center gap-3 px-4 py-1.5 pl-6 text-left text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800">
                         <Coffee size={13} className="shrink-0" />
                         <span className="flex-1 text-xs">Pause {p.end}–{next.start}</span>
                         <Plus size={13} />
@@ -438,13 +444,13 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
       )}
 
       <div className="px-4 pt-4 pb-2">
-        <h3 className="font-serif text-sm text-stone-500">{showGrid ? "Weitere Einträge" : "Einträge"}</h3>
+        <h3 className="font-serif text-sm text-stone-500 dark:text-stone-400">{showGrid ? "Weitere Einträge" : "Einträge"}</h3>
       </div>
-      <div className="border-t border-stone-300">
+      <div className="border-t border-stone-300 dark:border-stone-700">
         {freeEntries.map((entry) => {
           const editing = editKey === entry.id;
           return (
-            <div key={entry.id} className="border-b border-stone-300">
+            <div key={entry.id} className="border-b border-stone-300 dark:border-stone-700">
               {editing ? (
                 <div className="p-2">
                   <EntryForm initial={entry} activities={config.activities}
@@ -454,20 +460,20 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                 </div>
               ) : (
                 <button onClick={() => setEditKey(entry.id)}
-                  className={`w-full text-left flex items-center gap-3 px-4 py-2.5 border-l-4 ${isWorkEntry(entry) ? "border-emerald-700" : "border-stone-300"}`}>
-                  <div className="w-24 shrink-0 text-xs text-stone-500 tabular-nums">{entry.start}–{entry.end}</div>
+                  className={`w-full text-left flex items-center gap-3 px-4 py-2.5 border-l-4 ${isWorkEntry(entry) ? "border-emerald-700" : "border-stone-300 dark:border-stone-700"}`}>
+                  <div className="w-24 shrink-0 text-xs text-stone-500 dark:text-stone-400 tabular-nums">{entry.start}–{entry.end}</div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-stone-800">{entry.activity}</div>
-                    {entry.note && <div className="text-xs text-stone-500 truncate">{entry.note}</div>}
+                    <div className="text-sm text-stone-800 dark:text-stone-100">{entry.activity}</div>
+                    {entry.note && <div className="text-xs text-stone-500 dark:text-stone-400 truncate">{entry.note}</div>}
                   </div>
-                  <div className="text-xs text-stone-500 tabular-nums shrink-0">{isWorkEntry(entry) ? fmtDur(durationOf(entry)) : "—"}</div>
+                  <div className="text-xs text-stone-500 dark:text-stone-400 tabular-nums shrink-0">{isWorkEntry(entry) ? fmtDur(durationOf(entry)) : "—"}</div>
                 </button>
               )}
             </div>
           );
         })}
         {editKey === "new" ? (
-          <div className="p-2 border-b border-stone-300">
+          <div className="p-2 border-b border-stone-300 dark:border-stone-700">
             <EntryForm
               initial={{
                 start: freeEntries.length ? freeEntries[freeEntries.length - 1].end : (showGrid ? (periods[periods.length - 1]?.end || "15:00") : "09:00"),
@@ -480,12 +486,12 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
             />
           </div>
         ) : (
-          <button onClick={() => setEditKey("new")} className="w-full flex items-center gap-2 px-4 py-3 text-sm text-emerald-800 hover:bg-stone-100">
+          <button onClick={() => setEditKey("new")} className="w-full flex items-center gap-2 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-400 hover:bg-stone-100 dark:hover:bg-stone-800">
             <Plus size={16} /> Eintrag hinzufügen
           </button>
         )}
         {!showGrid && freeEntries.length === 0 && editKey !== "new" && (
-          <p className="px-4 py-3 text-sm text-stone-400">Kein Eintrag für diesen Tag.</p>
+          <p className="px-4 py-3 text-sm text-stone-400 dark:text-stone-500">Kein Eintrag für diesen Tag.</p>
         )}
       </div>
     </div>
@@ -581,7 +587,7 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
       <div className="px-4 pt-4 pb-2 flex gap-1.5">
         {[["day", "Tag"], ["week", "Woche"], ["month", "Monat"], ["custom", "Frei"]].map(([m, label]) => (
           <button key={m} onClick={() => setMode(m)}
-            className={`flex-1 py-1.5 text-sm border ${mode === m ? "bg-emerald-950 text-stone-100 border-emerald-950" : "border-stone-300 text-stone-600"}`}>
+            className={`flex-1 py-1.5 text-sm border ${mode === m ? "bg-emerald-950 text-stone-100 border-emerald-950" : "border-stone-300 dark:border-stone-700 text-stone-600 dark:text-stone-400"}`}>
             {label}
           </button>
         ))}
@@ -589,48 +595,48 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
 
       {mode === "custom" ? (
         <div className="px-4 pb-3 flex gap-2 items-center text-sm">
-          <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="border border-stone-300 px-2 py-1.5 flex-1 tabular-nums" />
-          <span className="text-stone-400">bis</span>
-          <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="border border-stone-300 px-2 py-1.5 flex-1 tabular-nums" />
+          <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="border border-stone-300 dark:border-stone-700 px-2 py-1.5 flex-1 tabular-nums" />
+          <span className="text-stone-400 dark:text-stone-500">bis</span>
+          <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="border border-stone-300 dark:border-stone-700 px-2 py-1.5 flex-1 tabular-nums" />
         </div>
       ) : (
         <div className="px-4 pb-3 flex items-center justify-between">
           <IconBtn onClick={() => shift(-1)}><ChevronLeft size={20} /></IconBtn>
-          <span className="text-sm font-serif text-stone-700">{range.label}</span>
+          <span className="text-sm font-serif text-stone-700 dark:text-stone-300">{range.label}</span>
           <IconBtn onClick={() => shift(1)}><ChevronRight size={20} /></IconBtn>
         </div>
       )}
 
-      <div className="border-t border-b border-stone-300 px-4 py-5 bg-stone-50 grid grid-cols-2 gap-4">
+      <div className="border-t border-b border-stone-300 dark:border-stone-700 px-4 py-5 bg-stone-50 dark:bg-stone-900 grid grid-cols-2 gap-4">
         <div>
-          <div className="text-xs uppercase tracking-wide text-stone-400">Tatsächlich gearbeitet</div>
-          <div className="font-serif text-2xl text-stone-800 mt-1 tabular-nums">{fmtDur(actual)}</div>
+          <div className="text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500">Tatsächlich gearbeitet</div>
+          <div className="font-serif text-2xl text-stone-800 dark:text-stone-100 mt-1 tabular-nums">{fmtDur(actual)}</div>
         </div>
         <div>
-          <div className="text-xs uppercase tracking-wide text-stone-400">Soll</div>
-          <div className="font-serif text-2xl text-stone-800 mt-1 tabular-nums">{fmtDur(target)}</div>
+          <div className="text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500">Soll</div>
+          <div className="font-serif text-2xl text-stone-800 dark:text-stone-100 mt-1 tabular-nums">{fmtDur(target)}</div>
         </div>
         <div>
-          <div className="text-xs uppercase tracking-wide text-stone-400">Krankheit / Urlaub</div>
-          <div className="font-serif text-2xl text-stone-800 mt-1 tabular-nums">{fmtDur(creditedAbsence)}</div>
+          <div className="text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500">Krankheit / Urlaub</div>
+          <div className="font-serif text-2xl text-stone-800 dark:text-stone-100 mt-1 tabular-nums">{fmtDur(creditedAbsence)}</div>
         </div>
         <div>
-          <div className="text-xs uppercase tracking-wide text-stone-400">Bilanz</div>
-          <div className={`font-serif text-2xl mt-1 tabular-nums ${difference < 0 ? "text-rose-700" : "text-emerald-800"}`}>
+          <div className="text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500">Bilanz</div>
+          <div className={`font-serif text-2xl mt-1 tabular-nums ${difference < 0 ? "text-rose-700 dark:text-rose-400" : "text-emerald-800 dark:text-emerald-400"}`}>
             {difference >= 0 ? "+" : "−"}{fmtDur(Math.abs(difference))}
           </div>
         </div>
       </div>
 
       <div className="px-4 py-3 space-y-3">
-        {activityList.length === 0 && <p className="text-sm text-stone-400 py-6 text-center">Keine Einträge in diesem Zeitraum.</p>}
+        {activityList.length === 0 && <p className="text-sm text-stone-400 dark:text-stone-500 py-6 text-center">Keine Einträge in diesem Zeitraum.</p>}
         {activityList.map(([act, min]) => (
           <div key={act}>
-            <div className="flex justify-between text-sm text-stone-700 mb-1">
+            <div className="flex justify-between text-sm text-stone-700 dark:text-stone-300 mb-1">
               <span>{act}</span>
-              <span className="tabular-nums text-stone-500">{fmtDur(min)}</span>
+              <span className="tabular-nums text-stone-500 dark:text-stone-400">{fmtDur(min)}</span>
             </div>
-            <div className="h-2 bg-stone-200 w-full">
+            <div className="h-2 bg-stone-200 dark:bg-stone-800 w-full">
               <div className="h-2 bg-emerald-700" style={{ width: `${(min / maxVal) * 100}%` }} />
             </div>
           </div>
@@ -638,7 +644,7 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
       </div>
 
       <div className="px-4 pt-2">
-        <button onClick={exportCSV} className="w-full flex items-center justify-center gap-2 border border-stone-300 py-2.5 text-sm text-stone-700 hover:bg-stone-100">
+        <button onClick={exportCSV} className="w-full flex items-center justify-center gap-2 border border-stone-300 dark:border-stone-700 py-2.5 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800">
           <Download size={15} /> Zeitraum als CSV exportieren
         </button>
       </div>
@@ -659,40 +665,40 @@ function TemplateEditor({ template, config, onChange, onClose }) {
   };
 
   return (
-    <div className="border border-stone-300 bg-stone-50 p-3 space-y-3 mt-2">
-      <label className="block text-xs text-stone-500">
+    <div className="border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900 p-3 space-y-3 mt-2">
+      <label className="block text-xs text-stone-500 dark:text-stone-400">
         Name
         <input type="text" value={template.name} onChange={(e) => setField("name", e.target.value)}
-          className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm" placeholder="z. B. 1. Halbjahr 2026/27" />
+          className="mt-0.5 w-full border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm" placeholder="z. B. 1. Halbjahr 2026/27" />
       </label>
       <div className="flex gap-2">
-        <label className="flex-1 text-xs text-stone-500">
+        <label className="flex-1 text-xs text-stone-500 dark:text-stone-400">
           Gültig von
           <input type="date" value={template.from} onChange={(e) => setField("from", e.target.value)}
-            className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums" />
+            className="mt-0.5 w-full border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm tabular-nums" />
         </label>
-        <label className="flex-1 text-xs text-stone-500">
+        <label className="flex-1 text-xs text-stone-500 dark:text-stone-400">
           Gültig bis
           <input type="date" value={template.to} onChange={(e) => setField("to", e.target.value)}
-            className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums" />
+            className="mt-0.5 w-full border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm tabular-nums" />
         </label>
       </div>
 
       <div className="flex gap-1 pt-1">
         {WD_SHORT.slice(0, 5).map((label, i) => (
           <button key={i} onClick={() => setTplDay(i)}
-            className={`flex-1 py-1.5 text-sm border ${tplDay === i ? "bg-emerald-950 text-stone-100 border-emerald-950" : "border-stone-300 text-stone-600 bg-white"}`}>
+            className={`flex-1 py-1.5 text-sm border ${tplDay === i ? "bg-emerald-950 text-stone-100 border-emerald-950" : "border-stone-300 dark:border-stone-700 text-stone-600 dark:text-stone-400 bg-white dark:bg-stone-800"}`}>
             {label}
           </button>
         ))}
       </div>
-      <div className="border border-stone-300 bg-white">
+      <div className="border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800">
         {[...config.periods].sort((a, b) => a.nr - b.nr).map((p) => (
-          <div key={p.nr} className="flex items-center gap-2 px-3 py-2 border-b border-stone-200 last:border-b-0">
-            <span className="w-16 text-xs text-stone-500 tabular-nums">{p.nr}. Std</span>
+          <div key={p.nr} className="flex items-center gap-2 px-3 py-2 border-b border-stone-200 dark:border-stone-800 last:border-b-0">
+            <span className="w-16 text-xs text-stone-500 dark:text-stone-400 tabular-nums">{p.nr}. Std</span>
             <input type="text" placeholder="z. B. Mathematik 8a" value={(template.days[tplDay] || {})[p.nr] || ""}
               onChange={(e) => setDayValue(p.nr, e.target.value)}
-              className="flex-1 border border-stone-300 px-2 py-1.5 text-sm" />
+              className="flex-1 border border-stone-300 dark:border-stone-700 px-2 py-1.5 text-sm" />
           </div>
         ))}
       </div>
@@ -703,7 +709,7 @@ function TemplateEditor({ template, config, onChange, onClose }) {
 
 /* ---------------------------------- Einstellungen ---------------------------------- */
 
-function EinstellungenView({ config, setConfig, templates, setTemplates, holidaySettings, setHolidaySettings, entries, setEntries, dayStatus, setDayStatus, resetAll }) {
+function EinstellungenView({ config, setConfig, templates, setTemplates, holidaySettings, setHolidaySettings, entries, setEntries, dayStatus, setDayStatus, theme, setTheme, resetAll }) {
   const [newActivity, setNewActivity] = useState("");
   const employment = config.employment;
   const setEmployment = (patch) => setConfig({ ...config, employment: { ...employment, ...patch } });
@@ -886,41 +892,62 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
   return (
     <div className="pb-24 px-4 pt-4 space-y-8">
       <section>
-        <h3 className="font-serif text-base text-stone-800 mb-1">Schulstunden-Zeiten</h3>
-        <p className="text-xs text-stone-500 mb-3">Die Anfangs- und Endzeiten deines Stundenrasters.</p>
-        <div className="border border-stone-300">
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Design</h3>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
+          „System“ übernimmt automatisch die Darkmode-Einstellung deines Geräts.
+        </p>
+        <div className="flex gap-1.5">
+          {["light", "dark", "system"].map((t) => {
+            const Icon = THEME_ICONS[t];
+            const active = theme === t;
+            return (
+              <button key={t} type="button" onClick={() => setTheme(t)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-sm border ${
+                  active ? "bg-emerald-950 text-stone-100 border-emerald-950" : "border-stone-300 dark:border-stone-700 text-stone-600 dark:text-stone-400"
+                }`}>
+                <Icon size={15} /> {THEME_LABELS[t]}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Schulstunden-Zeiten</h3>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">Die Anfangs- und Endzeiten deines Stundenrasters.</p>
+        <div className="border border-stone-300 dark:border-stone-700">
           {[...config.periods].sort((a, b) => a.nr - b.nr).map((p) => (
-            <div key={p.nr} className="flex items-center gap-2 px-3 py-2 border-b border-stone-200 last:border-b-0">
-              <span className="w-8 text-sm text-stone-500 tabular-nums">{p.nr}.</span>
+            <div key={p.nr} className="flex items-center gap-2 px-3 py-2 border-b border-stone-200 dark:border-stone-800 last:border-b-0">
+              <span className="w-8 text-sm text-stone-500 dark:text-stone-400 tabular-nums">{p.nr}.</span>
               <input type="time" value={p.start} onChange={(e) => updatePeriod(p.nr, "start", e.target.value)}
-                className="border border-stone-300 px-2 py-1 text-sm tabular-nums flex-1" />
-              <span className="text-stone-400">–</span>
+                className="border border-stone-300 dark:border-stone-700 px-2 py-1 text-sm tabular-nums flex-1" />
+              <span className="text-stone-400 dark:text-stone-500">–</span>
               <input type="time" value={p.end} onChange={(e) => updatePeriod(p.nr, "end", e.target.value)}
-                className="border border-stone-300 px-2 py-1 text-sm tabular-nums flex-1" />
+                className="border border-stone-300 dark:border-stone-700 px-2 py-1 text-sm tabular-nums flex-1" />
               <IconBtn tone="danger" onClick={() => removePeriod(p.nr)}><Trash2 size={16} /></IconBtn>
             </div>
           ))}
         </div>
-        <button onClick={addPeriod} className="mt-2 flex items-center gap-1.5 text-sm text-emerald-800">
+        <button onClick={addPeriod} className="mt-2 flex items-center gap-1.5 text-sm text-emerald-800 dark:text-emerald-400">
           <Plus size={15} /> Stunde hinzufügen
         </button>
       </section>
 
       <section>
-        <h3 className="font-serif text-base text-stone-800 mb-1">Arbeitszeitmodell</h3>
-        <p className="text-xs text-stone-500 mb-3">
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Arbeitszeitmodell</h3>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
           Bestimmt deine wöchentliche Soll-Arbeitszeit. Sie wird auf die Wochentage verteilt – an Tagen mit mehr
           geplanten Schulstunden entsprechend mehr, an unterrichtsfreien Werktagen entsprechend weniger.
         </p>
 
-        <label className="block text-xs text-stone-500 mb-3">
+        <label className="block text-xs text-stone-500 dark:text-stone-400 mb-3">
           Beschäftigungsumfang (%)
           <input type="number" min="1" max="100" value={employment.percentage} disabled={useIndividualTarget}
             onChange={(e) => setEmployment({ percentage: Math.max(1, Math.min(100, Number(e.target.value) || 0)) })}
-            className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums disabled:bg-stone-100 disabled:text-stone-400" />
+            className="mt-0.5 w-full border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm tabular-nums disabled:bg-stone-100 dark:disabled:bg-stone-800 disabled:text-stone-400 dark:disabled:text-stone-500" />
         </label>
 
-        <label className="block text-xs text-stone-500 mb-3">
+        <label className="block text-xs text-stone-500 dark:text-stone-400 mb-3">
           Vollzeit-Wochenreferenz
           <div className="mt-0.5 flex items-center gap-2">
             <input type="number" min="0" disabled={useIndividualTarget}
@@ -929,31 +956,31 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
                 const h = Math.max(0, Number(e.target.value) || 0);
                 setEmployment({ fullTimeWeeklyReferenceMinutes: h * 60 + (employment.fullTimeWeeklyReferenceMinutes % 60) });
               }}
-              className="w-20 border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums disabled:bg-stone-100 disabled:text-stone-400" />
-            <span className="text-stone-400 text-sm">Std</span>
+              className="w-20 border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm tabular-nums disabled:bg-stone-100 dark:disabled:bg-stone-800 disabled:text-stone-400 dark:disabled:text-stone-500" />
+            <span className="text-stone-400 dark:text-stone-500 text-sm">Std</span>
             <input type="number" min="0" max="59" disabled={useIndividualTarget}
               value={employment.fullTimeWeeklyReferenceMinutes % 60}
               onChange={(e) => {
                 const m = Math.max(0, Math.min(59, Number(e.target.value) || 0));
                 setEmployment({ fullTimeWeeklyReferenceMinutes: Math.floor(employment.fullTimeWeeklyReferenceMinutes / 60) * 60 + m });
               }}
-              className="w-20 border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums disabled:bg-stone-100 disabled:text-stone-400" />
-            <span className="text-stone-400 text-sm">Min</span>
+              className="w-20 border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm tabular-nums disabled:bg-stone-100 dark:disabled:bg-stone-800 disabled:text-stone-400 dark:disabled:text-stone-500" />
+            <span className="text-stone-400 dark:text-stone-500 text-sm">Min</span>
           </div>
-          <span className="block mt-1 text-xs text-stone-400">
+          <span className="block mt-1 text-xs text-stone-400 dark:text-stone-500">
             Der Standardwert 46:38 h orientiert sich am niedersächsischen Referenzmodell und ist kein allgemeingültiger
             gesetzlicher Wert – frei änderbar.
           </span>
         </label>
 
-        <label className="flex items-center gap-2 text-xs text-stone-500 mb-2">
+        <label className="flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400 mb-2">
           <input type="checkbox" checked={useIndividualTarget}
             onChange={(e) => setEmployment({ individualWeeklyTargetMinutes: e.target.checked ? weeklyTargetMinutes : null })} />
           Eigene Wochen-Sollzeit statt Beschäftigungsumfang verwenden
         </label>
 
         {useIndividualTarget && (
-          <label className="block text-xs text-stone-500 mb-3">
+          <label className="block text-xs text-stone-500 dark:text-stone-400 mb-3">
             Individuelle Wochen-Sollzeit
             <div className="mt-0.5 flex items-center gap-2">
               <input type="number" min="0" value={Math.floor(employment.individualWeeklyTargetMinutes / 60)}
@@ -961,41 +988,41 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
                   const h = Math.max(0, Number(e.target.value) || 0);
                   setEmployment({ individualWeeklyTargetMinutes: h * 60 + (employment.individualWeeklyTargetMinutes % 60) });
                 }}
-                className="w-20 border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums" />
-              <span className="text-stone-400 text-sm">Std</span>
+                className="w-20 border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm tabular-nums" />
+              <span className="text-stone-400 dark:text-stone-500 text-sm">Std</span>
               <input type="number" min="0" max="59" value={employment.individualWeeklyTargetMinutes % 60}
                 onChange={(e) => {
                   const m = Math.max(0, Math.min(59, Number(e.target.value) || 0));
                   setEmployment({ individualWeeklyTargetMinutes: Math.floor(employment.individualWeeklyTargetMinutes / 60) * 60 + m });
                 }}
-                className="w-20 border border-stone-300 bg-white px-2 py-1.5 text-sm tabular-nums" />
-              <span className="text-stone-400 text-sm">Min</span>
+                className="w-20 border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm tabular-nums" />
+              <span className="text-stone-400 dark:text-stone-500 text-sm">Min</span>
             </div>
           </label>
         )}
 
-        <p className="text-xs text-stone-600">
+        <p className="text-xs text-stone-600 dark:text-stone-400">
           Aktuelles Wochen-Soll: <span className="tabular-nums font-medium">{fmtDur(weeklyTargetMinutes)}</span>
         </p>
       </section>
 
       <section>
-        <h3 className="font-serif text-base text-stone-800 mb-1">Stundenplan-Vorlagen</h3>
-        <p className="text-xs text-stone-500 mb-3">
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Stundenplan-Vorlagen</h3>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
           Jede Vorlage gilt nur für einen bestimmten Zeitraum (z. B. ein Halbjahr). Für ein neues Halbjahr legst du
           einfach eine neue Vorlage an, ohne die aktuelle zu überschreiben.
         </p>
-        <div className="border border-stone-300">
-          {templates.length === 0 && <p className="px-3 py-3 text-sm text-stone-400">Noch keine Vorlage angelegt.</p>}
+        <div className="border border-stone-300 dark:border-stone-700">
+          {templates.length === 0 && <p className="px-3 py-3 text-sm text-stone-400 dark:text-stone-500">Noch keine Vorlage angelegt.</p>}
           {templates
             .slice()
             .sort((a, b) => a.from.localeCompare(b.from))
             .map((t) => (
-              <div key={t.id} className="border-b border-stone-200 last:border-b-0">
+              <div key={t.id} className="border-b border-stone-200 dark:border-stone-800 last:border-b-0">
                 <div className="flex items-center gap-2 px-3 py-2">
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-stone-800 truncate">{t.name || "(ohne Namen)"}</div>
-                    <div className="text-xs text-stone-500 tabular-nums">{fmtDateShort(parseISODate(t.from))} – {fmtDateShort(parseISODate(t.to))}</div>
+                    <div className="text-sm text-stone-800 dark:text-stone-100 truncate">{t.name || "(ohne Namen)"}</div>
+                    <div className="text-xs text-stone-500 dark:text-stone-400 tabular-nums">{fmtDateShort(parseISODate(t.from))} – {fmtDateShort(parseISODate(t.to))}</div>
                   </div>
                   <IconBtn onClick={() => setActiveTemplateId(activeTemplateId === t.id ? null : t.id)} title="Bearbeiten"><Pencil size={16} /></IconBtn>
                   <IconBtn tone="danger" onClick={() => removeTemplate(t.id)} title="Löschen"><Trash2 size={16} /></IconBtn>
@@ -1008,107 +1035,107 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
               </div>
             ))}
         </div>
-        <button onClick={addTemplate} className="mt-2 flex items-center gap-1.5 text-sm text-emerald-800">
+        <button onClick={addTemplate} className="mt-2 flex items-center gap-1.5 text-sm text-emerald-800 dark:text-emerald-400">
           <Plus size={15} /> Neue Stundenplan-Vorlage
         </button>
       </section>
 
       <section>
-        <h3 className="font-serif text-base text-stone-800 mb-1">Schulferien</h3>
-        <p className="text-xs text-stone-500 mb-3">
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Schulferien</h3>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
           An Ferientagen wird kein Schulstundenraster angezeigt – nur frei buchbare Zeitblöcke.
         </p>
-        <label className="block text-xs text-stone-500 mb-3">
+        <label className="block text-xs text-stone-500 dark:text-stone-400 mb-3">
           Bundesland
           <select value={holidaySettings.bundesland} onChange={(e) => setHolidaySettings({ ...holidaySettings, bundesland: e.target.value })}
-            className="mt-0.5 w-full border border-stone-300 bg-white px-2 py-1.5 text-sm">
+            className="mt-0.5 w-full border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1.5 text-sm">
             {BUNDESLAENDER.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
           </select>
         </label>
         <button onClick={loadHolidaysOnline} disabled={loadingHolidays}
-          className="w-full flex items-center justify-center gap-2 border border-stone-300 py-2.5 text-sm text-stone-700 hover:bg-stone-100 disabled:opacity-60 mb-2">
+          className="w-full flex items-center justify-center gap-2 border border-stone-300 dark:border-stone-700 py-2.5 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-60 mb-2">
           {loadingHolidays ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
           {loadingHolidays ? "Lade Ferientermine …" : "Ferien automatisch laden"}
         </button>
-        <label className="w-full flex items-center justify-center gap-2 border border-stone-300 py-2.5 text-sm text-stone-700 hover:bg-stone-100 cursor-pointer mb-2">
+        <label className="w-full flex items-center justify-center gap-2 border border-stone-300 dark:border-stone-700 py-2.5 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 cursor-pointer mb-2">
           <Upload size={15} /> Ferien aus ICS-Datei importieren
           <input type="file" accept=".ics,text/calendar" onChange={importICS} className="hidden" />
         </label>
-        <p className="text-xs text-stone-400 mb-2">
+        <p className="text-xs text-stone-400 dark:text-stone-500 mb-2">
           ICS-Dateien bekommst du z. B. von der Website deines Kultusministeriums oder von Kalender-Anbietern, die
           Schulferien als Kalender zum Download anbieten – Vorschau/Prüfung nach dem Import empfohlen.
         </p>
-        {holidayError && <p className="text-xs text-rose-700 mb-2">{holidayError}</p>}
+        {holidayError && <p className="text-xs text-rose-700 dark:text-rose-400 mb-2">{holidayError}</p>}
 
-        <div className="border border-stone-300">
-          {holidaySettings.holidays.length === 0 && <p className="px-3 py-3 text-sm text-stone-400">Noch keine Ferien hinterlegt.</p>}
+        <div className="border border-stone-300 dark:border-stone-700">
+          {holidaySettings.holidays.length === 0 && <p className="px-3 py-3 text-sm text-stone-400 dark:text-stone-500">Noch keine Ferien hinterlegt.</p>}
           {holidaySettings.holidays
             .slice()
             .sort((a, b) => a.start.localeCompare(b.start))
             .map((h) => (
-              <div key={h.id} className="flex items-center gap-2 px-3 py-2 border-b border-stone-200 last:border-b-0">
+              <div key={h.id} className="flex items-center gap-2 px-3 py-2 border-b border-stone-200 dark:border-stone-800 last:border-b-0">
                 <input type="text" value={h.name} onChange={(e) => updateHoliday(h.id, "name", e.target.value)}
-                  className="w-28 border border-stone-300 px-2 py-1 text-sm" />
+                  className="w-28 border border-stone-300 dark:border-stone-700 px-2 py-1 text-sm" />
                 <input type="date" value={h.start} onChange={(e) => updateHoliday(h.id, "start", e.target.value)}
-                  className="border border-stone-300 px-1 py-1 text-xs tabular-nums flex-1 min-w-0" />
-                <span className="text-stone-400 text-xs">–</span>
+                  className="border border-stone-300 dark:border-stone-700 px-1 py-1 text-xs tabular-nums flex-1 min-w-0" />
+                <span className="text-stone-400 dark:text-stone-500 text-xs">–</span>
                 <input type="date" value={h.end} onChange={(e) => updateHoliday(h.id, "end", e.target.value)}
-                  className="border border-stone-300 px-1 py-1 text-xs tabular-nums flex-1 min-w-0" />
+                  className="border border-stone-300 dark:border-stone-700 px-1 py-1 text-xs tabular-nums flex-1 min-w-0" />
                 <IconBtn tone="danger" onClick={() => removeHoliday(h.id)}><Trash2 size={15} /></IconBtn>
               </div>
             ))}
         </div>
-        <button onClick={addHoliday} className="mt-2 flex items-center gap-1.5 text-sm text-emerald-800">
+        <button onClick={addHoliday} className="mt-2 flex items-center gap-1.5 text-sm text-emerald-800 dark:text-emerald-400">
           <Plus size={15} /> Ferien manuell hinzufügen
         </button>
       </section>
 
       <section>
-        <h3 className="font-serif text-base text-stone-800 mb-1">Tätigkeiten</h3>
-        <p className="text-xs text-stone-500 mb-3">„Eigene Pause“ und „Ausgefallen“ zählen automatisch nicht als Arbeitszeit.</p>
-        <div className="border border-stone-300">
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Tätigkeiten</h3>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">„Eigene Pause“ und „Ausgefallen“ zählen automatisch nicht als Arbeitszeit.</p>
+        <div className="border border-stone-300 dark:border-stone-700">
           {config.activities.map((a) => (
-            <div key={a} className="flex items-center gap-2 px-3 py-2 border-b border-stone-200 last:border-b-0">
-              <span className="flex-1 text-sm text-stone-700">{a}</span>
+            <div key={a} className="flex items-center gap-2 px-3 py-2 border-b border-stone-200 dark:border-stone-800 last:border-b-0">
+              <span className="flex-1 text-sm text-stone-700 dark:text-stone-300">{a}</span>
               {a !== "Eigene Pause" && <IconBtn tone="danger" onClick={() => removeActivity(a)}><Trash2 size={15} /></IconBtn>}
             </div>
           ))}
         </div>
         <div className="mt-2 flex gap-2">
           <input type="text" value={newActivity} onChange={(e) => setNewActivity(e.target.value)} placeholder="Neue Tätigkeit …"
-            className="flex-1 border border-stone-300 px-2 py-1.5 text-sm" />
-          <button onClick={addActivity} className="px-3 border border-stone-300 text-emerald-800"><Plus size={16} /></button>
+            className="flex-1 border border-stone-300 dark:border-stone-700 px-2 py-1.5 text-sm" />
+          <button onClick={addActivity} className="px-3 border border-stone-300 dark:border-stone-700 text-emerald-800 dark:text-emerald-400"><Plus size={16} /></button>
         </div>
       </section>
 
       <section>
-        <h3 className="font-serif text-base text-stone-800 mb-1">Daten</h3>
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Daten</h3>
         <div className="space-y-2 mt-2">
-          <button onClick={exportJSON} className="w-full flex items-center justify-center gap-2 border border-stone-300 py-2.5 text-sm text-stone-700 hover:bg-stone-100">
+          <button onClick={exportJSON} className="w-full flex items-center justify-center gap-2 border border-stone-300 dark:border-stone-700 py-2.5 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800">
             <Download size={15} /> Alle Daten als JSON sichern
           </button>
-          <label className="w-full flex items-center justify-center gap-2 border border-stone-300 py-2.5 text-sm text-stone-700 hover:bg-stone-100 cursor-pointer">
+          <label className="w-full flex items-center justify-center gap-2 border border-stone-300 dark:border-stone-700 py-2.5 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 cursor-pointer">
             <Upload size={15} /> Daten aus Sicherung importieren
             <input type="file" accept="application/json" onChange={importJSON} className="hidden" />
           </label>
-          {importMsg && <p className="text-xs text-stone-500">{importMsg}</p>}
+          {importMsg && <p className="text-xs text-stone-500 dark:text-stone-400">{importMsg}</p>}
           {!confirmReset ? (
-            <button onClick={() => setConfirmReset(true)} className="w-full py-2.5 text-sm text-rose-700 border border-rose-300 hover:bg-rose-50">
+            <button onClick={() => setConfirmReset(true)} className="w-full py-2.5 text-sm text-rose-700 dark:text-rose-400 border border-rose-300 dark:border-rose-800 hover:bg-rose-50">
               Alle Daten zurücksetzen
             </button>
           ) : (
-            <div className="border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 space-y-2">
+            <div className="border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-3 text-sm text-rose-800 dark:text-rose-300 space-y-2">
               <p>Wirklich alle Einträge, Vorlagen und Einstellungen löschen? Das kann nicht rückgängig gemacht werden.</p>
               <div className="flex gap-2">
                 <button onClick={() => { resetAll(); setConfirmReset(false); }} className="flex-1 bg-rose-700 text-white py-1.5">Ja, löschen</button>
-                <button onClick={() => setConfirmReset(false)} className="flex-1 border border-rose-300 py-1.5">Abbrechen</button>
+                <button onClick={() => setConfirmReset(false)} className="flex-1 border border-rose-300 dark:border-rose-800 py-1.5">Abbrechen</button>
               </div>
             </div>
           )}
         </div>
       </section>
 
-      <p className="text-xs text-stone-400 pt-2 pb-4 leading-relaxed">
+      <p className="text-xs text-stone-400 dark:text-stone-500 pt-2 pb-4 leading-relaxed">
         Alle Daten liegen ausschließlich in diesem Browser auf diesem Gerät (localStorage) – es gibt keinen Server
         und kein Konto. Lösche daher niemals deine Browserdaten, ohne vorher eine JSON-Sicherung zu erstellen.
         Die automatischen Ferientermine stammen von einem öffentlichen Kalender-Dienst und sollten geprüft werden.
@@ -1129,14 +1156,31 @@ export default function App() {
   const [holidaySettings, setHolidaySettingsState] = useState(() => loadJSON("holidays", { bundesland: "NW", holidays: [] }));
   const [entries, setEntriesState] = useState(() => loadJSON("entries", {}));
   const [dayStatus, setDayStatusState] = useState(() => loadJSON("dayStatus", {}));
+  const [theme, setThemeState] = useState(() => loadJSON("theme", "system"));
   const [tab, setTab] = useState("tag");
   const [date, setDate] = useState(new Date());
+
+  // Wendet den gewählten Design-Modus an. Bei "system" wird zusätzlich auf Änderungen der
+  // Geräte-Einstellung (z. B. automatischer Wechsel bei Sonnenuntergang) live reagiert.
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark = theme === "dark" || (theme === "system" && media.matches);
+      document.documentElement.classList.toggle("dark", dark);
+    };
+    apply();
+    if (theme === "system") {
+      media.addEventListener("change", apply);
+      return () => media.removeEventListener("change", apply);
+    }
+  }, [theme]);
 
   const setConfig = (next) => { setConfigState(next); saveJSON("config", next); };
   const setTemplates = (next) => { setTemplatesState(next); saveJSON("templates", next); };
   const setHolidaySettings = (next) => { setHolidaySettingsState(next); saveJSON("holidays", next); };
   const setEntries = (next) => { setEntriesState(next); saveJSON("entries", next); };
   const setDayStatus = (next) => { setDayStatusState(next); saveJSON("dayStatus", next); };
+  const setTheme = (next) => { setThemeState(next); saveJSON("theme", next); };
   const setDayEntries = (dateKey, list) => {
     const next = { ...entries };
     if (list.length) next[dateKey] = list; else delete next[dateKey];
@@ -1162,7 +1206,7 @@ export default function App() {
   ];
 
   return (
-    <div className="max-w-md mx-auto bg-stone-100 min-h-screen font-sans relative" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
+    <div className="max-w-md mx-auto bg-stone-100 dark:bg-stone-950 dark:text-stone-100 min-h-screen font-sans relative" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
       <div className="sticky top-0 z-10 bg-emerald-950 text-stone-100 px-4 py-2.5 flex items-center justify-between">
         <span className="font-serif text-lg tracking-tight">Pensum</span>
         <span className="text-xs text-emerald-300">Arbeitszeit für Lehrkräfte</span>
@@ -1182,6 +1226,7 @@ export default function App() {
           holidaySettings={holidaySettings} setHolidaySettings={setHolidaySettings}
           entries={entries} setEntries={setEntries}
           dayStatus={dayStatus} setDayStatus={setDayStatus}
+          theme={theme} setTheme={setTheme}
           resetAll={resetAll}
         />
       )}
