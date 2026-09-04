@@ -73,18 +73,35 @@ Die Tagesansicht berücksichtigt:
 - Bemerkungen
 - Kennzeichnung ausgefallener Stunden
 
-An Wochenenden, Ferientagen und an Tagen mit Status „Krank“ oder „Urlaub“ wird kein Schulstundenraster angezeigt.
-Es können dort weiterhin freie Einträge erfasst werden.
+An Wochenenden, Ferientagen und an ganztägig als Krank/Urlaub markierten Tagen wird kein Schulstundenraster angezeigt.
+Bei einer nur teilweise abwesenden Zeitspanne ("ab Uhrzeit" / "bis Uhrzeit") bleibt das Raster sichtbar; nur die
+abgedeckten Schulstunden werden als Status-Hinweis statt als bearbeitbarer Slot dargestellt (siehe unten). Es können
+in allen Fällen weiterhin freie Einträge erfasst werden.
 
 ### Tages-Status: Krankheit und Urlaub
 
 Jeder Tag kann in der Tagesansicht auf `WORK` (Standard, kein gespeicherter Eintrag), `SICK` oder `VACATION` gesetzt
-werden. Der Status ist unabhängig von den erfassten Zeiteinträgen:
+werden. Zusätzlich lässt sich der Zeitraum innerhalb des Tages eingrenzen:
+
+- **Ganzer Tag** (Standard, kein `from`/`to`) – das komplette Schulstundenraster wird ausgeblendet.
+- **Ab Uhrzeit** (`from`) – der Tag gilt ab dieser Uhrzeit bis Tagesende (genauer: bis zum Ende der letzten
+  konfigurierten Schulstunde) als Krank/Urlaub. Schulstunden vor dieser Uhrzeit bleiben normal bearbeitbar.
+- **Bis Uhrzeit** (`to`) – der Tag gilt von Tagesbeginn (Beginn der ersten konfigurierten Schulstunde) bis zu dieser
+  Uhrzeit als Krank/Urlaub. Schulstunden danach bleiben normal bearbeitbar.
+
+Schulstunden, die vollständig oder teilweise im markierten Zeitraum liegen und noch keinen eigenen Eintrag haben,
+werden im Raster nur noch als schlichter Status-Hinweis ("Krank"/"Urlaub") angezeigt – ohne Möglichkeit, dafür eine
+Tätigkeit auszuwählen. Existiert für eine solche Stunde bereits ein Eintrag (z. B. weil zuerst gearbeitet und danach
+der Status gesetzt wurde), bleibt dieser unangetastet und weiterhin normal bearbeitbar; Daten gehen dadurch nie
+verloren.
+
+Der Status ist unabhängig von den erfassten Zeiteinträgen:
 
 - Er beeinflusst **nicht** die tatsächlich geleistete Arbeitszeit (Ist) – vorhandene Einträge an einem Krank-/
   Urlaubstag zählen weiterhin normal zur Ist-Arbeitszeit, falls doch etwas erfasst wurde.
-- Er bestimmt aber, ob das Tages-Soll dieses Tages in der Auswertung als **anrechenbare Abwesenheit** gezählt wird
-  (siehe Abschnitt 6a und 11).
+- Er bestimmt aber, welcher Anteil des Tages-Solls dieses Tages in der Auswertung als **anrechenbare Abwesenheit**
+  gezählt wird (siehe Abschnitt 6a und 11). Bei "Ganzer Tag" ist das der volle Tages-Soll-Wert, bei "Ab"/"Bis
+  Uhrzeit" ein anteiliger Wert relativ zum Schulstunden-Zeitfenster.
 
 Dies setzt bewusst nur den ersten Teil des größeren Soll/Ist/Abwesenheits-Konzepts um. Nicht umgesetzt sind bislang:
 weitere Statuswerte (`HOLIDAY`, `SCHOOL_BREAK`, `OTHER_ABSENCE`), eine Jahresarbeitszeit-/Kalenderjahr-Betrachtung,
@@ -111,7 +128,8 @@ Wichtige Helfer in `src/App.jsx`:
 - `fromMin(min)` → Minuten zu `HH:MM`
 - `addMin(hhmm, delta)` → Uhrzeit verschieben
 - `durationOf(entry)` → Dauer eines Eintrags in Minuten
-- `fmtDur(min)` → benutzerfreundliche Darstellung
+- `fmtDur(min)` → benutzerfreundliche Darstellung; rundet intern auf ganze Minuten, damit z. B. anteilige
+  Soll-/Anrechnungswerte nie mit Nachkommastellen angezeigt werden
 - `isWorkEntry(entry)` → entscheidet, ob ein Eintrag zur Arbeitszeit zählt
 
 Aktuell gelten diese Tätigkeiten als **keine Arbeitszeit**:
@@ -139,7 +157,10 @@ Wichtige Helfer in `src/App.jsx`:
 - `dailyTargetMinutes(templates, employment, date)` → Tages-Soll. Das Wochensoll wird proportional zur Anzahl
   geplanter Stunden an diesem Wochentag verteilt (mehr Unterricht an einem Tag → höheres Tages-Soll). Ohne aktive
   Vorlage oder ohne geplante Stunden darin wird gleichmäßig auf 5 Werktage verteilt. Am Wochenende ist das Soll 0.
-- `dayStatusOf(dayStatus, date)` → `"WORK"`, `"SICK"` oder `"VACATION"` für ein Datum (Standard `"WORK"`).
+- `dayAbsenceFraction(config, statusEntry)` → Anteil (0–1) eines Tages, der durch einen Abwesenheitseintrag
+  (`{ status, from?, to? }`) abgedeckt ist. Ohne `statusEntry` (Status `WORK`): 0. Ohne `from`/`to` (ganztägig): 1.
+  Mit `from`/`to`: Anteil relativ zum Schulstunden-Zeitfenster (erste bis letzte konfigurierte Schulstunde,
+  `config.periods`).
 
 Das Tages-Soll ist **unabhängig vom Ferienstatus** – Ferien reduzieren das Soll aktuell nicht automatisch (siehe
 Abschnitt 5, offene Punkte).
@@ -277,12 +298,21 @@ Bei Einträgen für reguläre Schulstunden wird `periodNr` verwendet. Bei Pausen
 
 ```js
 {
-  "YYYY-MM-DD": { status: "SICK" | "VACATION" }
+  "YYYY-MM-DD": { status: "SICK" | "VACATION", from?: "HH:MM", to?: "HH:MM" }
 }
 ```
 
 Nur Tage mit Status `SICK` oder `VACATION` besitzen einen Eintrag. Fehlt ein Datum in `dayStatus`, gilt implizit
 `status: "WORK"`. Das Setzen von `"WORK"` in der Tagesansicht löscht daher den Eintrag statt ihn zu speichern.
+
+`from` und `to` sind optional und schließen sich gegenseitig aus (es wird in der Tagesansicht immer nur eines von
+beiden gesetzt):
+
+- weder `from` noch `to` gesetzt → ganztägig abwesend
+- `from` gesetzt → abwesend ab dieser Uhrzeit bis Tagesende (Ende der letzten konfigurierten Schulstunde)
+- `to` gesetzt → abwesend von Tagesbeginn (Beginn der ersten konfigurierten Schulstunde) bis zu dieser Uhrzeit
+
+Siehe `dayAbsenceFraction()` (Abschnitt 6a) für die daraus abgeleitete anteilige Anrechnung.
 
 ## 10. Ferien
 
@@ -313,7 +343,8 @@ Sie berechnet:
 
 - tatsächlich geleistete Arbeitszeit (Ist) im Zeitraum
 - Soll-Arbeitszeit im Zeitraum (Summe der Tages-Soll-Werte, siehe Abschnitt 6a)
-- anrechenbare Abwesenheitszeit (Summe der Tages-Soll-Werte an Tagen mit Status `SICK`/`VACATION`)
+- anrechenbare Abwesenheitszeit (Summe der Tages-Soll-Werte an Tagen mit Status `SICK`/`VACATION`, gewichtet mit
+  `dayAbsenceFraction()` – bei ganztägiger Abwesenheit voll, bei "ab"/"bis Uhrzeit" anteilig)
 - Bilanz/Differenz: `Ist + anrechenbare Abwesenheit − Soll`
 - Arbeitszeit nach Tätigkeit
 - Detailzeilen für den CSV-Export

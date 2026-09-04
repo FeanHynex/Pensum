@@ -61,8 +61,9 @@ const toMin = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return h *
 const fromMin = (min) => `${pad2(Math.floor(min / 60) % 24)}:${pad2(min % 60)}`;
 const addMin = (hhmm, delta) => fromMin(Math.max(0, toMin(hhmm) + delta));
 const fmtDur = (min) => {
-  if (min <= 0) return "0 Min";
-  const h = Math.floor(min / 60), m = min % 60;
+  const rounded = Math.round(min);
+  if (rounded <= 0) return "0 Min";
+  const h = Math.floor(rounded / 60), m = rounded % 60;
   if (h === 0) return `${m} Min`;
   if (m === 0) return `${h} Std`;
   return `${h} Std ${m} Min`;
@@ -116,7 +117,23 @@ const dailyTargetMinutes = (templates, employment, date) => {
   return weeklyTarget * (counts[wd] / totalWeek);
 };
 
-const dayStatusOf = (dayStatus, date) => (dayStatus[toISODate(date)] || {}).status || "WORK";
+// Anteil eines Tages (0–1), der durch einen Abwesenheitsstatus (Krank/Urlaub) abgedeckt ist.
+// Ohne `from`/`to` gilt der ganze Tag als abgedeckt. Mit `from` ("ab Uhrzeit bis Tagesende") bzw.
+// `to` ("von Tagesbeginn bis Uhrzeit") wird der Anteil relativ zum Schulstunden-Zeitfenster
+// (erste bis letzte konfigurierte Schulstunde) berechnet.
+const dayAbsenceFraction = (config, statusEntry) => {
+  if (!statusEntry) return 0;
+  if (!statusEntry.from && !statusEntry.to) return 1;
+  const sorted = [...config.periods].sort((a, b) => a.nr - b.nr);
+  if (!sorted.length) return 1;
+  const winStart = toMin(sorted[0].start);
+  const winEnd = toMin(sorted[sorted.length - 1].end);
+  const windowLen = winEnd - winStart;
+  if (windowLen <= 0) return 1;
+  const from = statusEntry.from ? Math.max(winStart, toMin(statusEntry.from)) : winStart;
+  const to = statusEntry.to ? Math.min(winEnd, toMin(statusEntry.to)) : winEnd;
+  return Math.max(0, to - from) / windowLen;
+};
 
 /* ---------------------------------- Kleinbausteine ---------------------------------- */
 
@@ -190,10 +207,15 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
   const wd = wdIndex(date);
   const isWeekend = wd >= 5;
   const holiday = findHolidayFor(holidays, date);
-  const status = dayStatusOf(dayStatus, date);
+  const statusEntry = dayStatus[dateKey] || null;
+  const status = statusEntry?.status || "WORK";
+  const statusFrom = statusEntry?.from || null;
+  const statusTo = statusEntry?.to || null;
+  const partialMode = statusFrom ? "FROM" : statusTo ? "TO" : "FULL";
+  const isFullDayAbsence = status !== "WORK" && partialMode === "FULL";
   const activeTemplate = findTemplateFor(templates, date);
   const dayTemplate = (!isWeekend && activeTemplate) ? (activeTemplate.days[wd] || {}) : {};
-  const showGrid = !isWeekend && !holiday && status === "WORK";
+  const showGrid = !isWeekend && !holiday && !isFullDayAbsence;
 
   const dayList = entries[dateKey] || [];
   const [editKey, setEditKey] = useState(null);
@@ -217,6 +239,20 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
   const remove = (id) => { commit(dayList.filter((e) => e.id !== id)); setEditKey(null); };
 
   const periods = [...config.periods].sort((a, b) => a.nr - b.nr);
+
+  // Zeitfenster, das bei "ab Uhrzeit" / "bis Uhrzeit" durch Krankheit/Urlaub abgedeckt ist.
+  const absenceInterval = (status !== "WORK" && !isFullDayAbsence && periods.length)
+    ? (statusFrom
+        ? [toMin(statusFrom), toMin(periods[periods.length - 1].end)]
+        : [toMin(periods[0].start), toMin(statusTo)])
+    : null;
+  const isCoveredByAbsence = (startHHMM, endHHMM) => {
+    if (!absenceInterval) return false;
+    const s = toMin(startHHMM), e = toMin(endHHMM);
+    return s < absenceInterval[1] && e > absenceInterval[0];
+  };
+
+  const setStatus = (patch) => setDayStatus(dateKey, patch === null ? null : { status, ...patch });
 
   return (
     <div className="pb-24">
@@ -246,10 +282,34 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
         ))}
       </div>
       {status !== "WORK" && (
-        <p className="px-4 pb-2 text-xs text-amber-700">
-          Als „{DAY_STATUS_LABELS[status]}“ markiert – zählt nicht als Ist-Arbeitszeit, wird aber bei der
-          Soll-Erfüllung angerechnet.
-        </p>
+        <div className="px-4 pb-2 space-y-2">
+          <div className="flex gap-1.5">
+            {[["FULL", "Ganzer Tag"], ["FROM", "Ab Uhrzeit"], ["TO", "Bis Uhrzeit"]].map(([m, label]) => (
+              <button key={m} type="button"
+                onClick={() => setStatus(
+                  m === "FROM" ? { from: statusFrom || "12:00", to: undefined }
+                    : m === "TO" ? { to: statusTo || "12:00", from: undefined }
+                    : { from: undefined, to: undefined }
+                )}
+                className={`flex-1 py-1 text-xs border ${partialMode === m ? "bg-amber-700 text-stone-50 border-amber-700" : "border-stone-300 text-stone-500"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {partialMode === "FROM" && (
+            <input type="time" value={statusFrom} onChange={(e) => setStatus({ from: e.target.value })}
+              className="border border-stone-300 bg-white px-2 py-1 text-sm tabular-nums" />
+          )}
+          {partialMode === "TO" && (
+            <input type="time" value={statusTo} onChange={(e) => setStatus({ to: e.target.value })}
+              className="border border-stone-300 bg-white px-2 py-1 text-sm tabular-nums" />
+          )}
+          <p className="text-xs text-amber-700">
+            Als „{DAY_STATUS_LABELS[status]}“
+            {partialMode === "FROM" ? ` ab ${statusFrom} Uhr` : partialMode === "TO" ? ` bis ${statusTo} Uhr` : " (ganzer Tag)"}
+            {" "}markiert – zählt nicht als Ist-Arbeitszeit, wird aber anteilig bei der Soll-Erfüllung angerechnet.
+          </p>
+        </div>
       )}
 
       {showGrid && (
@@ -264,6 +324,8 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
             const slotKey = `pause-${p.nr}`;
             const slotEntry = slotEntries[slotKey];
             const slotEditKey = `slot-${slotKey}`;
+            const periodCovered = !entry && isCoveredByAbsence(p.start, p.end);
+            const gapCovered = !slotEntry && next && isCoveredByAbsence(p.end, next.start);
 
             return (
               <React.Fragment key={p.nr}>
@@ -297,6 +359,14 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                         {isWorkEntry(entry) ? fmtDur(durationOf(entry)) : "—"}
                       </div>
                     </button>
+                  ) : periodCovered ? (
+                    <div className="flex items-center gap-3 px-4 py-2.5 border-l-4 border-amber-300 bg-amber-50/40 text-stone-400">
+                      <div className="w-16 shrink-0 text-xs tabular-nums leading-tight">
+                        <div>{p.nr}. Std</div>
+                        <div>{p.start}–{p.end}</div>
+                      </div>
+                      <div className="flex-1 text-sm italic">{DAY_STATUS_LABELS[status]}</div>
+                    </div>
                   ) : templ ? (
                     <div className="flex items-center gap-3 px-4 py-2.5 border-l-4 border-dashed border-amber-500">
                       <div className="w-16 shrink-0 text-xs text-stone-500 tabular-nums leading-tight">
@@ -331,7 +401,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                   )}
                 </div>
 
-                {gap > 0 && (
+                {gap > 0 && !gapCovered && (
                   <div className="border-b border-stone-300 bg-stone-50">
                     {editKey === slotEditKey ? (
                       <div className="p-2">
@@ -424,7 +494,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
 
 /* ---------------------------------- Auswertung ---------------------------------- */
 
-function AuswertungView({ entries, templates, dayStatus, employment }) {
+function AuswertungView({ entries, templates, dayStatus, employment, config }) {
   const [mode, setMode] = useState("week");
   const [anchor, setAnchor] = useState(new Date());
   const [customFrom, setCustomFrom] = useState(toISODate(startOfWeek(new Date())));
@@ -471,12 +541,13 @@ function AuswertungView({ entries, templates, dayStatus, employment }) {
     while (cursor <= last) {
       const dayTarget = dailyTargetMinutes(templates, employment, cursor);
       target += dayTarget;
-      if (dayStatusOf(dayStatus, cursor) !== "WORK") creditedAbsence += dayTarget;
+      const statusEntry = dayStatus[toISODate(cursor)] || null;
+      if (statusEntry) creditedAbsence += dayTarget * dayAbsenceFraction(config, statusEntry);
       cursor = addDays(cursor, 1);
     }
 
     return { actual, target, creditedAbsence, byActivity, rows };
-  }, [entries, range, templates, dayStatus, employment]);
+  }, [entries, range, templates, dayStatus, employment, config]);
 
   const effective = actual + creditedAbsence;
   const difference = effective - target;
@@ -1102,7 +1173,7 @@ export default function App() {
           templates={templates} holidays={holidaySettings.holidays} dayStatus={dayStatus} setDayStatus={setDayStatusFor} />
       )}
       {tab === "auswertung" && (
-        <AuswertungView entries={entries} templates={templates} dayStatus={dayStatus} employment={config.employment} />
+        <AuswertungView entries={entries} templates={templates} dayStatus={dayStatus} employment={config.employment} config={config} />
       )}
       {tab === "einstellungen" && (
         <EinstellungenView

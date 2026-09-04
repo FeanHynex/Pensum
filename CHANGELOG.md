@@ -2,6 +2,36 @@
 
 Alle Einträge beziehen sich auf den Stand des GitHub-Projekts. Die Datei soll bei relevanten zukünftigen Änderungen durch die bearbeitende KI ergänzt werden.
 
+## 2026-09-03 (3)
+
+### Fehlerbehebungen
+
+- `fmtDur()` rundet jetzt vor der Formatierung auf ganze Minuten. Zuvor konnten insbesondere Soll-/Anrechnungswerte
+  (z. B. bei ungerader Verteilung auf 5 Werktage oder anteiliger Krankheits-/Urlaubsanrechnung) mit
+  Nachkommastellen bei den Minuten angezeigt werden.
+
+### Funktionalität
+
+- Krankheits-/Urlaubstage können jetzt zusätzlich zu „Ganzer Tag“ auch „Ab Uhrzeit“ (bis Tagesende) oder
+  „Bis Uhrzeit“ (ab Tagesbeginn) markiert werden (`dayStatus[...].from` bzw. `.to`).
+- Bei „Ganzer Tag“ bleibt das bisherige Verhalten (kein Schulstundenraster). Bei „Ab“/„Bis Uhrzeit“ bleibt das
+  Raster sichtbar; nur die davon betroffenen, noch nicht erfassten Schulstunden werden als reiner Status-Hinweis
+  ohne Tätigkeitsauswahl angezeigt – für sie ist keine weitere Tätigkeitsbeschreibung mehr nötig. Bereits
+  vorhandene Einträge in diesem Zeitraum bleiben unverändert erhalten und editierbar.
+- Die anrechenbare Abwesenheitszeit in der Auswertung wird bei „Ab“/„Bis Uhrzeit“ jetzt anteilig (statt ganztägig)
+  über `dayAbsenceFraction()` berechnet, relativ zum Schulstunden-Zeitfenster (erste bis letzte konfigurierte
+  Schulstunde).
+
+### Daten
+
+- `dayStatus`-Einträge können jetzt zusätzlich `from` bzw. `to` (`"HH:MM"`) enthalten. Bestehende Einträge ohne
+  diese Felder gelten weiterhin als ganztägig – vollständig abwärtskompatibel.
+
+### Dokumentation
+
+- `AI_CONTEXT.md` und `ARCHITECTURE.md` um das erweiterte `dayStatus`-Datenmodell (`from`/`to`), die neue
+  Perioden-Abdeckungslogik in der Tagesansicht und die anteilige Anrechnungsberechnung ergänzt.
+
 ## 2026-09-03 (2)
 
 ### Funktionalität

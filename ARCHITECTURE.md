@@ -128,7 +128,14 @@ Sie erhält unter anderem:
 - `dayStatus`
 
 und verwendet `setDayEntries()` zum Speichern der Tagesdaten sowie `setDayStatus(dateKey, value)` zum Setzen bzw.
-(bei `value = null`) Löschen des Tages-Status. `value` ist entweder `null` (= Status `WORK`) oder `{ status: "SICK" | "VACATION" }`.
+(bei `value = null`) Löschen des Tages-Status. `value` ist entweder `null` (= Status `WORK`) oder
+`{ status: "SICK" | "VACATION", from?: "HH:MM", to?: "HH:MM" }` (siehe Abschnitt 6, `dayStatus`).
+
+Bei ganztägiger Abwesenheit (weder `from` noch `to` gesetzt) wird das komplette Schulstundenraster ausgeblendet. Bei
+teilweiser Abwesenheit (`from` oder `to` gesetzt) bleibt das Raster sichtbar; Schulstunden ohne eigenen Eintrag, die
+im markierten Zeitraum liegen, werden als reiner Status-Hinweis dargestellt statt als bearbeitbarer/leerer Slot –
+dafür ist keine Tätigkeitsauswahl mehr nötig. Bereits vorhandene Einträge in dieser Zeitspanne bleiben unverändert
+editierbar.
 
 ### `EntryForm`
 
@@ -145,8 +152,8 @@ Gemeinsames Formular für:
 ### `AuswertungView`
 
 Ermittelt anhand von `entries` einen Zeitraum und aggregiert die Ist-Arbeitszeit. Berechnet zusätzlich anhand von
-`templates`, `dayStatus` und `employment` die Soll-Arbeitszeit und die anrechenbare Abwesenheitszeit des Zeitraums
-(siehe Abschnitt 12a).
+`templates`, `dayStatus`, `employment` und `config` (für das Schulstunden-Zeitfenster bei anteiliger Anrechnung) die
+Soll-Arbeitszeit und die anrechenbare Abwesenheitszeit des Zeitraums (siehe Abschnitt 12a).
 
 ### `TemplateEditor`
 
@@ -267,10 +274,13 @@ entries
 ```text
 dayStatus
 └── YYYY-MM-DD
-    └── status   ("SICK" | "VACATION")
+    ├── status   ("SICK" | "VACATION")
+    ├── from     (optional, "HH:MM" – abwesend ab dieser Uhrzeit bis Tagesende)
+    └── to       (optional, "HH:MM" – abwesend von Tagesbeginn bis zu dieser Uhrzeit)
 ```
 
-Nur Tage mit Abwesenheitsstatus haben einen Eintrag. Ohne Eintrag gilt ein Datum implizit als `"WORK"`.
+Nur Tage mit Abwesenheitsstatus haben einen Eintrag. Ohne Eintrag gilt ein Datum implizit als `"WORK"`. `from` und
+`to` schließen sich gegenseitig aus; sind beide nicht gesetzt, gilt der ganze Tag als abwesend.
 
 ## 7. Eintragsarten
 
@@ -359,17 +369,23 @@ Datum
  │
  ├── Ferien? ──────────────────── Ja ──> kein Schulstundenraster
  │
- ├── Status "Krank"/"Urlaub"? ─── Ja ──> kein Schulstundenraster
+ ├── Status "Krank"/"Urlaub", ganztägig? ─ Ja ──> kein Schulstundenraster
  │
  └── sonst ─────────────────────────────> Schulstundenraster
                                               │
                                               ├── vorhandener Eintrag
+                                              ├── (falls Zeit im Abwesenheitsfenster liegt) Status-Hinweis, ohne Tätigkeitsauswahl
                                               ├── geplante Vorlage
                                               └── leer
 ```
 
-Der Tages-Status wird über `dayStatusOf(dayStatus, date)` ermittelt und ist unabhängig von Wochenende/Ferien. Freie
-Einträge bleiben in allen drei "kein Schulstundenraster"-Fällen weiterhin möglich.
+Der Tages-Status wird direkt aus `dayStatus[dateKey]` gelesen (`status`, optional `from`/`to`) und ist unabhängig von
+Wochenende/Ferien. Freie Einträge bleiben in allen "kein Schulstundenraster"-Fällen weiterhin möglich.
+
+Bei teilweiser Abwesenheit (`from` oder `to` gesetzt) wird pro Schulstunde und Pausenslot per `isCoveredByAbsence()`
+geprüft, ob deren Zeitspanne mit dem Abwesenheitsfenster überlappt. Nur Slots **ohne** vorhandenen Eintrag werden
+dabei durch den Status-Hinweis ersetzt bzw. (bei Pausen) ausgeblendet – ein bereits erfasster Eintrag wird nie
+verdeckt oder verworfen.
 
 Zwischen zwei Schulstunden wird aus der Differenz von `p.end` und `next.start` ein optionaler Pausenslot erzeugt.
 
@@ -467,11 +483,21 @@ Zusätzlich zur Ist-Arbeitszeit berechnet `AuswertungView` für denselben Zeitra
 für jeden Tag im Zeitraum:
     dayTarget = dailyTargetMinutes(templates, employment, tag)
     target += dayTarget
-    falls dayStatusOf(dayStatus, tag) != "WORK":
-        creditedAbsence += dayTarget
+    statusEntry = dayStatus[tag]  (oder null)
+    falls statusEntry vorhanden:
+        creditedAbsence += dayTarget × dayAbsenceFraction(config, statusEntry)
 
 effective = actual + creditedAbsence
 difference = effective - target
+```
+
+`dayAbsenceFraction()`:
+
+```text
+kein statusEntry ──> 0
+statusEntry ohne from/to (ganztägig) ──> 1
+statusEntry mit from/to ──> Anteil der Überschneidung von [from, to] mit dem Schulstunden-Zeitfenster
+    (erste bis letzte konfigurierte Schulstunde aus config.periods), relativ zur Fensterlänge
 ```
 
 `dailyTargetMinutes()`:
@@ -488,7 +514,9 @@ aktive Stundenplan-Vorlage für den Tag vorhanden und enthält geplante Stunden?
 ```
 
 Diese Berechnung ist unabhängig von den tatsächlich erfassten Einträgen (`entries`) und von Ferien/Feiertagen – sie
-iteriert rein über Kalendertage und die für das jeweilige Datum aktive Stundenplan-Vorlage.
+iteriert rein über Kalendertage und die für das jeweilige Datum aktive Stundenplan-Vorlage. Die dabei entstehenden
+Zwischenwerte sind bewusst nicht gerundet (z. B. bei ungerader Aufteilung auf 5 Werktage oder anteiliger
+Krankheits-/Urlaubsanrechnung); erst `fmtDur()` rundet für die Anzeige auf ganze Minuten.
 
 ## 13. Import/Export
 
