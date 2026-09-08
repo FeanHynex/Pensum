@@ -38,6 +38,10 @@ const BUNDESLAENDER = [
   { code: "SH", name: "Schleswig-Holstein" }, { code: "TH", name: "Thüringen" },
 ];
 
+// Wird von Vite über `define` in vite.config.js aus der "version" in package.json ersetzt.
+// Fallback "0.0.0" nur zur Absicherung, falls das define ausnahmsweise fehlt.
+const APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0";
+
 const NONWORK = new Set(["Eigene Pause", "Ausgefallen"]);
 const WD_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
@@ -1030,7 +1034,7 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
   };
 
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ config, templates, holidaySettings, entries, dayStatus }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ appVersion: APP_VERSION, config, templates, holidaySettings, entries, dayStatus }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = `pensum_backup_${toISODate(new Date())}.json`; a.click();
@@ -1302,6 +1306,14 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
             </div>
           )}
         </div>
+      </section>
+
+      <section>
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Info</h3>
+        <p className="text-sm text-stone-600 dark:text-stone-400">Pensum {APP_VERSION}</p>
+        <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
+          Testversion – Rückmeldungen und Fehler bitte direkt weitergeben.
+        </p>
       </section>
 
       <p className="text-xs text-stone-400 dark:text-stone-500 pt-2 pb-4 leading-relaxed">

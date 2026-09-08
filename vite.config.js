@@ -5,6 +5,12 @@ import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig({
   // GitHub Pages project site: https://<username>.github.io/Pensum/
   base: "/Pensum/",
+  // Stellt die Version aus package.json als globale Konstante __APP_VERSION__ zur Laufzeit bereit
+  // (z. B. Anzeige in den Einstellungen). Bei jedem funktional relevanten Release muss die
+  // "version" in package.json manuell hochgezählt werden.
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version)
+  },
   plugins: [
     react(),
     VitePWA({

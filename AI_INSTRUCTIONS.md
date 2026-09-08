@@ -21,6 +21,16 @@ Diese Datei ist die verbindliche Arbeitsanweisung für KI-Systeme, die am Projek
 - Ändere Design, Texte oder Verhalten nicht nebenbei, wenn dies nicht Teil der Aufgabe ist.
 - Sicherheits-, Datenschutz- und Offline-Eigenschaften des bestehenden Konzepts müssen berücksichtigt werden.
 - Die Anwendung hat keinen eigenen Backend-Server und keine Benutzerkonten. Ferientermine können allerdings von einem externen öffentlichen Dienst geladen werden.
+- Pensum befindet sich in einer **Testphase für ausgewählte Lehrkräfte** (siehe `AI_CONTEXT.md`, Abschnitt 1).
+  Daraus ergeben sich zwei dauerhafte Pflichten für jede Änderung:
+  1. **Versionsnummer erhöhen**: Bei jeder funktional oder technisch relevanten Änderung die `"version"` in
+     `package.json` hochzählen (z. B. `0.0.1` → `0.0.2`). Sie wird über `vite.config.js` (`__APP_VERSION__`) als
+     `APP_VERSION` in `src/App.jsx` gelesen und in den Einstellungen unter „Info" angezeigt. Rein redaktionelle
+     Doku-Änderungen ohne Codeänderung erfordern keine Versionserhöhung.
+  2. **Export/Import kompatibel halten**: Jede neue oder geänderte Datenstruktur muss weiterhin über den
+     JSON-Export/-Import (Abschnitt „Datensicherung" in den Einstellungen) gesichert und wiederhergestellt werden
+     können, damit Nutzerdaten bei Gerätewechsel oder einem späteren Übergang in eine „Vollversion" erhalten
+     bleiben.
 
 ## 3. Umgang mit dem bestehenden Code
 

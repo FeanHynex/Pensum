@@ -1,6 +1,6 @@
 # Pensum – Technische Architektur
 
-Stand: 08.09.2026 (mit Ergänzung: Diagramme in der Auswertung)
+Stand: 08.09.2026 (mit Ergänzung: Versionsnummer für die Testphase)
 
 ## 1. Architekturprinzip
 
@@ -80,7 +80,11 @@ Initialisiert React und rendert `<App />` in `#root`.
 
 ### `vite.config.js`
 
-Konfiguriert React, PWA und GitHub-Pages-Basis `/Pensum/`.
+Konfiguriert React, PWA und GitHub-Pages-Basis `/Pensum/`. Stellt außerdem per `define` die globale Build-Konstante
+`__APP_VERSION__` bereit, deren Wert `process.env.npm_package_version` ist (also die `"version"` aus
+`package.json`, ohne zusätzliche Abhängigkeit oder JSON-Import). `src/App.jsx` liest daraus die Konstante
+`APP_VERSION` (mit Fallback `"0.0.0"`, falls das Define ausnahmsweise fehlt) und zeigt sie in
+`EinstellungenView` an.
 
 ### `.github/workflows/deploy.yml`
 
@@ -194,9 +198,10 @@ Verwaltet:
 - Stundenplan-Vorlagen
 - Ferien
 - Tätigkeiten
-- Datenexport/-import (inkl. `dayStatus`, aber **ohne** `theme` – der Design-Modus ist eine reine
+- Datenexport/-import (inkl. `dayStatus` und `appVersion`, aber **ohne** `theme` – der Design-Modus ist eine reine
   Anzeigeeinstellung des Geräts/Browsers, kein Arbeitszeit-Datum)
 - Zurücksetzen (`resetAll` setzt ausdrücklich nicht `theme` zurück)
+- Anzeige der aktuellen App-Version (`APP_VERSION`, Abschnitt „Info") – reine Anzeige, kein `localStorage`-Wert
 
 ## 5. State- und Datenfluss
 
@@ -600,9 +605,13 @@ Verlauf wird nur ab Modus „Woche“ aufwärts angezeigt (nicht bei Modus „Ta
 
 ### JSON
 
-Der JSON-Export speichert den kompletten aktuellen App-Zustand, inklusive `dayStatus`.
+Der JSON-Export speichert den kompletten aktuellen App-Zustand, inklusive `dayStatus`, sowie zusätzlich
+`appVersion` (die `APP_VERSION` zum Exportzeitpunkt) als reine Migrations-/Diagnoseinformation.
 
 Der Import setzt die vorhandenen Bereiche nur dann, wenn der entsprechende Schlüssel in der Datei vorhanden ist.
+`appVersion` wird beim Import aktuell nicht ausgewertet oder geprüft – ältere Sicherungen ohne dieses Feld bleiben
+vollständig kompatibel. Das Feld ist als Grundlage für eine spätere Migrationslogik (Gerätewechsel, Übergang in
+eine mögliche „Vollversion") vorgesehen, ohne dass dafür bereits jetzt eine Versionsprüfung nötig wäre.
 
 ### CSV
 

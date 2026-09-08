@@ -2,6 +2,32 @@
 
 Alle Einträge beziehen sich auf den Stand des GitHub-Projekts. Die Datei soll bei relevanten zukünftigen Änderungen durch die bearbeitende KI ergänzt werden.
 
+## 2026-09-08 (2)
+
+### Funktionalität
+
+- Neue Testphase-Kennzeichnung: Die Einstellungen zeigen jetzt unter „Info" die aktuelle App-Version an (z. B.
+  „Pensum 0.0.1"), sowie einen kurzen Hinweis, dass es sich um eine Testversion handelt. Gedacht für die
+  Weitergabe an ausgewählte Lehrkräfte zum Testen.
+- Der JSON-Export enthält zusätzlich das Feld `appVersion` (Version zum Exportzeitpunkt) als Grundlage für eine
+  spätere Migration (Gerätewechsel, mögliche „Vollversion"). Der Import bleibt vollständig kompatibel zu älteren
+  Sicherungen ohne dieses Feld.
+
+### Technisch
+
+- `package.json`: `"version"` von `1.0.0` auf `0.0.1` gesetzt (Start der Testphase-Zählung).
+- `vite.config.js`: neues `define` stellt `__APP_VERSION__` aus `process.env.npm_package_version` bereit (keine
+  neue Abhängigkeit).
+- `src/App.jsx`: neue Konstante `APP_VERSION` (mit Fallback `"0.0.0"`), Anzeige in `EinstellungenView`, sowie
+  `appVersion` im JSON-Export.
+
+### Dokumentation
+
+- `AI_INSTRUCTIONS.md`: dauerhafte Regel ergänzt, bei relevanten Änderungen die Version hochzuzählen und
+  Export/Import kompatibel zu halten.
+- `AI_CONTEXT.md` und `ARCHITECTURE.md`: neuen Abschnitt zur Testphase, zur Versionsanzeige und zum erweiterten
+  Export-Format (`appVersion`) ergänzt.
+
 ## 2026-09-08
 
 ### Funktionalität

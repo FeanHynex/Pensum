@@ -1,12 +1,34 @@
 # Pensum – Projektkontext für KI
 
-Stand: 08.09.2026 (mit Ergänzung: Diagramme in der Auswertung)
+Stand: 08.09.2026 (mit Ergänzung: Versionsnummer und Testphase für ausgewählte Lehrkräfte)
 
 ## 1. Projekt
 
 **Pensum** ist eine Web-App zur Erfassung und Auswertung der Arbeitszeit von Lehrkräften.
 
 Das aktuelle Projekt ist als kleine, mobile-first React-Anwendung aufgebaut und kann als Progressive Web App (PWA) über GitHub Pages veröffentlicht werden.
+
+### Aktuelle Projektphase: Testversion für ausgewählte Lehrkräfte
+
+Pensum befindet sich aktuell in einer **frühen Testphase** und wird gezielt an eine kleine Gruppe ausgewählter
+Lehrkräfte weitergegeben, damit diese die aktuelle Version ausprobieren und Rückmeldung geben können. Daraus
+ergeben sich zwei verbindliche, dauerhafte Anforderungen an jede künftige Änderung (nicht nur einmalig für diese
+Aufgabe):
+
+1. **Versionsnummer**: Die App zeigt in den Einstellungen unter „Info" ihre aktuelle Version an (`Pensum {Version}`,
+   z. B. „Pensum 0.0.1" als erste Testversion). Die Version stammt aus dem Feld `"version"` in `package.json` und
+   wird beim Build über Vite (`define: { __APP_VERSION__ }` in `vite.config.js`) als Konstante `APP_VERSION` in
+   `src/App.jsx` bereitgestellt – keine zusätzliche Bibliothek nötig. **Bei jeder funktional oder technisch
+   relevanten Änderung muss die `"version"` in `package.json` erhöht werden** (z. B. `0.0.1` → `0.0.2`), damit
+   Testerinnen und Tester unterscheiden können, welchen Stand sie gerade nutzen. Rein redaktionelle
+   Doku-Korrekturen ohne Codeänderung erfordern keine Versionserhöhung.
+2. **Export/Import bleibt Pflicht**: Da es in dieser Phase (und absehbar auch danach) kein Backend und keine
+   Benutzerkonten gibt, ist der vollständige JSON-Export/-Import (Abschnitt 12) die einzige Möglichkeit, Daten bei
+   einem Gerätewechsel zu übernehmen oder später in eine mögliche „Vollversion" zu überführen. Jede Änderung an
+   Datenstrukturen muss weiterhin im Export enthalten sein und beim Import kompatibel bleiben (siehe
+   `AI_INSTRUCTIONS.md`, Abschnitt 2 und 4). Der Export enthält zusätzlich `appVersion` (die Version, mit der die
+   Sicherung erstellt wurde) als Information für eine spätere Migration; der Import wertet dieses Feld aktuell
+   nicht zwingend aus und funktioniert auch mit älteren Sicherungen ohne dieses Feld weiterhin.
 
 ## 2. Technischer Stack
 
@@ -54,8 +76,8 @@ Die App besitzt aktuell drei Hauptbereiche:
 
 1. **Tag** – Erfassung und Bearbeitung von Arbeitszeiten für einen einzelnen Tag.
 2. **Auswertung** – Auswertung nach Tag, Woche, Monat oder frei gewähltem Zeitraum.
-3. **Einstellungen** – Design (Hell/Dunkel/System), Stundenraster, Stundenplan-Vorlagen, Ferien, Tätigkeiten und
-   Datensicherung.
+3. **Einstellungen** – Design (Hell/Dunkel/System), Stundenraster, Stundenplan-Vorlagen, Ferien, Tätigkeiten,
+   Datensicherung und Info (Versionsnummer).
 
 Die Oberfläche ist auf eine schmale, mobile Darstellung ausgelegt (`max-w-md`) und verwendet überwiegend Tailwind-Klassen.
 
@@ -436,6 +458,7 @@ Der JSON-Export enthält aktuell:
 
 ```js
 {
+  appVersion,   // Version der App zum Zeitpunkt des Exports, z. B. "0.0.1"
   config,
   templates,
   holidaySettings,
@@ -443,6 +466,10 @@ Der JSON-Export enthält aktuell:
   dayStatus
 }
 ```
+
+`appVersion` dient als Information für eine spätere Migration (Gerätewechsel oder Übergang in eine mögliche
+„Vollversion") und wird beim Import nicht zwingend benötigt – ältere Sicherungen ohne dieses Feld bleiben
+importierbar, da der Import jeden Schlüssel nur setzt, wenn er in der Datei vorhanden ist.
 
 ## 13. PWA und GitHub Pages
 
