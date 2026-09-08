@@ -41,6 +41,40 @@ const BUNDESLAENDER = [
 const NONWORK = new Set(["Eigene Pause", "Ausgefallen"]);
 const WD_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
+// Kategorisierung von Tätigkeiten für die Auswertung (Diagramm "Aufteilung nach Kategorie").
+// Feste Zuordnung ohne eigenen Einstellungen-Dialog; nicht in DEFAULT_ACTIVITIES aufgeführte bzw.
+// benutzerdefinierte Tätigkeiten fallen automatisch unter "sonstiges".
+const CATEGORY_META = {
+  unterricht: { label: "Unterricht", color: "#059669" },
+  vorNachbereitung: { label: "Vor-/Nachbereitung", color: "#d97706" },
+  kommunikation: { label: "Kommunikation / Gremien", color: "#0284c7" },
+  aufsicht: { label: "Aufsicht", color: "#7c3aed" },
+  verwaltung: { label: "Verwaltung / Organisation", color: "#0d9488" },
+  fortbildung: { label: "Fortbildung", color: "#6366f1" },
+  sonstiges: { label: "Sonstiges", color: "#78716c" },
+};
+const ACTIVITY_TO_CATEGORY = {
+  "Unterricht": "unterricht",
+  "Vertretungsunterricht": "unterricht",
+  "Unterrichtsvorbereitung": "vorNachbereitung",
+  "Unterrichtsnachbereitung": "vorNachbereitung",
+  "Korrektur": "vorNachbereitung",
+  "Elterngespräch": "kommunikation",
+  "Gespräch mit Schüler:in": "kommunikation",
+  "Gespräch mit Kolleg:in": "kommunikation",
+  "Konferenz": "kommunikation",
+  "Dienstbesprechung": "kommunikation",
+  "Pausenaufsicht": "aufsicht",
+  "Klassenleitung": "verwaltung",
+  "Organisation / Verwaltung": "verwaltung",
+  "Fortbildung": "fortbildung",
+  "Schulveranstaltung": "sonstiges",
+  "Klassenfahrt": "sonstiges",
+  "Projektarbeit": "sonstiges",
+  "Sonstiges": "sonstiges",
+};
+const categoryOf = (activity) => ACTIVITY_TO_CATEGORY[activity] || "sonstiges";
+
 // Arbeitszeitmodell: Vollzeit-Referenz orientiert sich am niedersächsischen Referenzmodell
 // (46:38 h/Woche), ist aber bewusst konfigurierbar und kein gesetzlich verbindlicher Wert.
 const DEFAULT_EMPLOYMENT = {
@@ -127,6 +161,16 @@ const dailyTargetMinutes = (templates, employment, date) => {
 // Ohne `from`/`to` gilt der ganze Tag als abgedeckt. Mit `from` ("ab Uhrzeit bis Tagesende") bzw.
 // `to` ("von Tagesbeginn bis Uhrzeit") wird der Anteil relativ zum Schulstunden-Zeitfenster
 // (erste bis letzte konfigurierte Schulstunde) berechnet.
+// Frühestes Datum mit mindestens einem gespeicherten Eintrag (über alle `entries`, unabhängig vom
+// aktuell gewählten Auswertungszeitraum). `null`, falls noch keine Einträge existieren. Wird verwendet,
+// damit Soll-/Bilanz-Berechnungen nicht rückwirkend vor der tatsächlichen Nutzung der App greifen
+// (siehe AuswertungView).
+const firstEntryDate = (entries) => {
+  const keys = Object.keys(entries).filter((k) => (entries[k] || []).length > 0);
+  if (keys.length === 0) return null;
+  return parseISODate(keys.reduce((a, b) => (a < b ? a : b)));
+};
+
 const dayAbsenceFraction = (config, statusEntry) => {
   if (!statusEntry) return 0;
   if (!statusEntry.from && !statusEntry.to) return 1;
@@ -498,6 +542,77 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
   );
 }
 
+/* ---------------------------------- Auswertung: Diagramme ---------------------------------- */
+
+// Reines SVG-Ringdiagramm (kein Chart-Package) für die Aufteilung der Ist-Arbeitszeit nach Kategorie.
+function CategoryDonut({ data, total }) {
+  const size = 140, radius = 52, cx = size / 2, cy = size / 2, strokeWidth = 18;
+  const circumference = 2 * Math.PI * radius;
+  let cumulative = 0;
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size} className="mx-auto">
+      <g transform={`rotate(-90 ${cx} ${cy})`}>
+        <circle cx={cx} cy={cy} r={radius} fill="none" strokeWidth={strokeWidth}
+          stroke="currentColor" className="text-stone-200 dark:text-stone-800" />
+        {total > 0 && data.map(([key, val]) => {
+          const frac = val / total;
+          const segLen = frac * circumference;
+          const dashoffset = -cumulative;
+          cumulative += segLen;
+          return (
+            <circle key={key} cx={cx} cy={cy} r={radius} fill="none" strokeWidth={strokeWidth}
+              stroke={CATEGORY_META[key].color}
+              strokeDasharray={`${segLen} ${circumference - segLen}`}
+              strokeDashoffset={dashoffset} />
+          );
+        })}
+      </g>
+      <text x={cx} y={cy - 4} textAnchor="middle" className="fill-stone-800 dark:fill-stone-100" style={{ fontSize: 15, fontFamily: "serif" }}>
+        {fmtDur(total)}
+      </text>
+      <text x={cx} y={cy + 14} textAnchor="middle" className="fill-stone-400 dark:fill-stone-500" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        gearbeitet
+      </text>
+    </svg>
+  );
+}
+
+// Reiner Div-/CSS-Balkenverlauf (kein Chart-Package): Ist pro Tag als Balken, Soll als gestrichelte Linie.
+function TrendChart({ days }) {
+  const barMax = 64;
+  const maxVal = Math.max(1, ...days.map((d) => Math.max(d.actual, d.target)));
+  return (
+    <div>
+      <div className="overflow-x-auto">
+        <div className="flex items-end gap-2 px-1" style={{ minWidth: "max-content", height: barMax + 24 }}>
+          {days.map((d) => {
+            const actualH = Math.round((d.actual / maxVal) * barMax);
+            const targetH = Math.round((d.target / maxVal) * barMax);
+            return (
+              <div key={d.dateKey} className="flex flex-col items-center justify-end" style={{ width: 20, height: barMax + 24 }}>
+                <div className="relative flex items-end justify-center" style={{ height: barMax, width: 12 }}>
+                  {d.target > 0 && (
+                    <div className="absolute w-full border-t-2 border-dashed border-stone-400 dark:border-stone-500"
+                      style={{ bottom: targetH }} />
+                  )}
+                  <div className="w-full bg-emerald-700" style={{ height: actualH }} />
+                </div>
+                <span className="text-[9px] text-stone-400 dark:text-stone-500 mt-1 tabular-nums">
+                  {parseISODate(d.dateKey).getDate()}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div className="flex items-center gap-4 text-[11px] text-stone-400 dark:text-stone-500 mt-1 px-1">
+        <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-emerald-700" /> Ist</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-2.5 border-t-2 border-dashed border-stone-400 dark:border-stone-500" /> Soll</span>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------------------------- Auswertung ---------------------------------- */
 
 function AuswertungView({ entries, templates, dayStatus, employment, config }) {
@@ -520,46 +635,65 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
     return { from, to, label: `${fmtDateShort(from)} – ${fmtDateShort(to)}` };
   }, [mode, anchor, customFrom, customTo]);
 
-  const { actual, target, creditedAbsence, byActivity, rows } = useMemo(() => {
+  // Frühester jemals erfasster Eintrag – Soll, Anrechnung und Bilanz laufen erst ab diesem Datum,
+  // damit ein Einstieg mitten im Jahr nicht rückwirkend ein unerreichbares Soll erzeugt (siehe
+  // AI_CONTEXT.md, Abschnitt 11).
+  const floorDate = useMemo(() => firstEntryDate(entries), [entries]);
+
+  const { actual, target, creditedAbsence, byActivity, byCategory, rows, dayStats } = useMemo(() => {
     let actual = 0;
+    let target = 0;
+    let creditedAbsence = 0;
     const byActivity = {};
+    const byCategory = {};
     const rows = [];
-    Object.keys(entries).forEach((dateKey) => {
-      const d = parseISODate(dateKey);
-      if (d < new Date(range.from.getFullYear(), range.from.getMonth(), range.from.getDate())) return;
-      if (d > new Date(range.to.getFullYear(), range.to.getMonth(), range.to.getDate())) return;
-      entries[dateKey].forEach((e) => {
+    const dayStats = [];
+
+    let cursor = new Date(range.from.getFullYear(), range.from.getMonth(), range.from.getDate());
+    const last = new Date(range.to.getFullYear(), range.to.getMonth(), range.to.getDate());
+    while (cursor <= last) {
+      const dateKey = toISODate(cursor);
+      const beforeFirstEntry = !!floorDate && cursor < floorDate;
+
+      let dayActual = 0;
+      (entries[dateKey] || []).forEach((e) => {
         const dur = durationOf(e);
         rows.push({ date: dateKey, ...e, dur });
         if (isWorkEntry(e)) {
           actual += dur;
+          dayActual += dur;
           byActivity[e.activity] = (byActivity[e.activity] || 0) + dur;
+          const cat = categoryOf(e.activity);
+          byCategory[cat] = (byCategory[cat] || 0) + dur;
         }
       });
-    });
 
-    // Soll und anrechenbare Abwesenheit (Krankheit/Urlaub) werden Tag für Tag über den Zeitraum ermittelt,
-    // unabhängig von den erfassten Einträgen (siehe dailyTargetMinutes).
-    let target = 0;
-    let creditedAbsence = 0;
-    let cursor = new Date(range.from.getFullYear(), range.from.getMonth(), range.from.getDate());
-    const last = new Date(range.to.getFullYear(), range.to.getMonth(), range.to.getDate());
-    while (cursor <= last) {
-      const dayTarget = dailyTargetMinutes(templates, employment, cursor);
+      // Soll und anrechenbare Abwesenheit (Krankheit/Urlaub) werden Tag für Tag über den Zeitraum
+      // ermittelt, unabhängig von den erfassten Einträgen (siehe dailyTargetMinutes). Vor dem ersten
+      // jemals erfassten Eintrag zählt weder Soll noch Abwesenheit.
+      const dayTarget = beforeFirstEntry ? 0 : dailyTargetMinutes(templates, employment, cursor);
       target += dayTarget;
-      const statusEntry = dayStatus[toISODate(cursor)] || null;
-      if (statusEntry) creditedAbsence += dayTarget * dayAbsenceFraction(config, statusEntry);
+      if (!beforeFirstEntry) {
+        const statusEntry = dayStatus[dateKey] || null;
+        if (statusEntry) creditedAbsence += dayTarget * dayAbsenceFraction(config, statusEntry);
+      }
+
+      dayStats.push({ dateKey, actual: dayActual, target: dayTarget });
       cursor = addDays(cursor, 1);
     }
 
-    return { actual, target, creditedAbsence, byActivity, rows };
-  }, [entries, range, templates, dayStatus, employment, config]);
+    return { actual, target, creditedAbsence, byActivity, byCategory, rows, dayStats };
+  }, [entries, range, templates, dayStatus, employment, config, floorDate]);
 
   const effective = actual + creditedAbsence;
   const difference = effective - target;
 
   const activityList = Object.entries(byActivity).sort((a, b) => b[1] - a[1]);
   const maxVal = activityList.length ? activityList[0][1] : 1;
+  const categoryList = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
+  const rangeFromNormalized = new Date(range.from.getFullYear(), range.from.getMonth(), range.from.getDate());
+  const showFloorHint = !!floorDate && floorDate > rangeFromNormalized;
+  const showTrendChart = mode !== "day" && dayStats.length > 1;
 
   const shift = (dir) => {
     if (mode === "day") setAnchor(addDays(anchor, dir));
@@ -628,7 +762,42 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
         </div>
       </div>
 
+      {showFloorHint && (
+        <p className="px-4 py-2 text-xs text-stone-400 dark:text-stone-500 bg-stone-50 dark:bg-stone-900 border-b border-stone-300 dark:border-stone-700">
+          Hinweis: Soll und Bilanz werden erst ab deinem ersten Eintrag am {fmtDateShort(floorDate)} berechnet,
+          da davor keine Arbeitszeit erfasst wurde.
+        </p>
+      )}
+
+      {showTrendChart && (
+        <div className="px-4 py-4 border-b border-stone-300 dark:border-stone-700">
+          <div className="text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500 mb-2">Verlauf: Ist vs. Soll</div>
+          <TrendChart days={dayStats} />
+        </div>
+      )}
+
+      {categoryList.length > 0 && (
+        <div className="px-4 py-4 border-b border-stone-300 dark:border-stone-700">
+          <div className="text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500 mb-3">Aufteilung nach Kategorie</div>
+          <div className="flex items-center gap-4">
+            <CategoryDonut data={categoryList} total={actual} />
+            <div className="flex-1 space-y-1.5">
+              {categoryList.map(([key, min]) => (
+                <div key={key} className="flex items-center justify-between text-xs text-stone-600 dark:text-stone-400">
+                  <span className="flex items-center gap-1.5 truncate">
+                    <span className="inline-block w-2.5 h-2.5 shrink-0" style={{ backgroundColor: CATEGORY_META[key].color }} />
+                    <span className="truncate">{CATEGORY_META[key].label}</span>
+                  </span>
+                  <span className="tabular-nums shrink-0 ml-2">{fmtDur(min)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="px-4 py-3 space-y-3">
+        <div className="text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500 mb-1">Aufteilung nach Tätigkeit</div>
         {activityList.length === 0 && <p className="text-sm text-stone-400 dark:text-stone-500 py-6 text-center">Keine Einträge in diesem Zeitraum.</p>}
         {activityList.map(([act, min]) => (
           <div key={act}>

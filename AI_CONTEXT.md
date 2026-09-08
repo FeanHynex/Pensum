@@ -1,6 +1,6 @@
 # Pensum – Projektkontext für KI
 
-Stand: 04.09.2026 (mit Ergänzung: Darkmode)
+Stand: 08.09.2026 (mit Ergänzung: Diagramme in der Auswertung)
 
 ## 1. Projekt
 
@@ -225,6 +225,11 @@ Die aktuelle Standardliste enthält unter anderem:
 
 Zusätzliche Tätigkeiten können in den Einstellungen angelegt werden.
 
+Für die Auswertung (Kategorie-Diagramm, siehe Abschnitt 11) ist jede Standard-Tätigkeit fest einer von sieben
+Kategorien zugeordnet (`ACTIVITY_TO_CATEGORY` in `src/App.jsx`). Benutzerdefinierte oder nicht zugeordnete
+Tätigkeiten fallen automatisch unter die Kategorie „Sonstiges“; es gibt aktuell keine Möglichkeit, diese Zuordnung
+in den Einstellungen anzupassen.
+
 ## 9. Datenspeicherung
 
 Es gibt aktuell keinen eigenen Backend-Server, keine Datenbank und keine Benutzerkonten.
@@ -366,9 +371,12 @@ Sie berechnet:
   `dayAbsenceFraction()` – bei ganztägiger Abwesenheit voll, bei "ab"/"bis Uhrzeit" anteilig)
 - Bilanz/Differenz: `Ist + anrechenbare Abwesenheit − Soll`
 - Arbeitszeit nach Tätigkeit
+- Arbeitszeit nach Kategorie (siehe unten)
+- Tagesverlauf Ist vs. Soll für den gewählten Zeitraum (siehe unten)
 - Detailzeilen für den CSV-Export
 
-`Eigene Pause` und `Ausgefallen` werden bei der Ist-Arbeitszeit und der Tätigkeitsauswertung ausgeschlossen.
+`Eigene Pause` und `Ausgefallen` werden bei der Ist-Arbeitszeit, der Tätigkeits- und der Kategorieauswertung
+ausgeschlossen.
 
 Die vier Kennzahlen (Ist, Soll, Anrechnung, Bilanz) werden für Tag/Woche/Monat/freien Zeitraum gleich berechnet – die
 Soll- und Anrechnungswerte iterieren dafür Tag für Tag über den gewählten Zeitraum, unabhängig von den tatsächlich
@@ -383,6 +391,38 @@ Der CSV-Export enthält unter anderem:
 - Bemerkung
 - Dauer in Minuten
 - Kennzeichnung, ob es Arbeitszeit ist
+
+### Soll/Bilanz erst ab dem ersten erfassten Eintrag
+
+Damit ein Einstieg mitten im (Schul-)Jahr nicht rückwirkend ein unerreichbares Jahressoll erzeugt, wird für
+Soll-Arbeitszeit, anrechenbare Abwesenheit und Bilanz ein globaler Startpunkt berücksichtigt: das früheste Datum,
+für das überhaupt jemals ein Eintrag existiert (`firstEntryDate(entries)` in `src/App.jsx`, über alle `entries`,
+unabhängig vom aktuell gewählten Auswertungszeitraum).
+
+- Für Kalendertage **vor** diesem Datum wird kein Tages-Soll und keine anrechenbare Abwesenheit angesetzt (Tages-Soll
+  zählt dort als 0), selbst wenn der gewählte Zeitraum (z. B. „Frei“ oder ein Monat) weiter zurückreicht.
+- Die tatsächlich gearbeitete Zeit (Ist) ist davon nicht betroffen – vor dem ersten Eintrag existieren ohnehin keine
+  Einträge.
+- Existiert noch gar kein Eintrag, greift keine Einschränkung (Soll wird regulär berechnet; da keine Einträge
+  vorliegen, sind ohnehin alle Kennzahlen 0).
+- In der Auswertung erscheint dazu ein Hinweistext, wenn dieses früheste Datum nach dem Anfang des aktuell
+  angezeigten Zeitraums liegt (d. h. wenn es die Berechnung tatsächlich beeinflusst).
+
+### Diagramme
+
+Die Auswertung stellt zwei zusätzliche Visualisierungen dar (beide ohne externe Chart-Bibliothek, reines SVG/CSS):
+
+- **Aufteilung nach Kategorie** – Ringdiagramm (Donut) der Ist-Arbeitszeit im Zeitraum, gruppiert nach einer festen
+  Kategorie-Zuordnung der Tätigkeiten (`ACTIVITY_TO_CATEGORY`/`CATEGORY_META` in `src/App.jsx`): Unterricht,
+  Vor-/Nachbereitung, Kommunikation/Gremien, Aufsicht, Verwaltung/Organisation, Fortbildung, Sonstiges. Tätigkeiten
+  ohne explizite Zuordnung (auch benutzerdefinierte) fallen automatisch unter „Sonstiges“. Die Zuordnung ist aktuell
+  fest im Code hinterlegt und nicht über die Einstellungen konfigurierbar.
+- **Verlauf: Ist vs. Soll** – Balkendiagramm mit einem Balken pro Kalendertag im gewählten Zeitraum (Ist als Balken,
+  Soll als gestrichelte Linie), horizontal scrollbar bei längeren Zeiträumen. Wird bei Modus „Tag“ ausgeblendet, da
+  dort nur ein einzelner Tag betrachtet wird.
+
+Die bestehende Balkenliste „Aufteilung nach Tätigkeit“ (einzelne Tätigkeiten) bleibt zusätzlich zum neuen
+Kategorie-Donut unverändert erhalten.
 
 ## 12. Datensicherung
 
@@ -441,3 +481,6 @@ Eine solche Aufteilung sollte jedoch nicht nur aus Gründen der Optik erfolgen. 
 - Das Soll-/Ist-/Anrechnungsmodell (Abschnitt 6a, 11) ist ein erster Ausbauschritt eines größeren Konzepts. Es fehlen
   bislang insbesondere: weitere Abwesenheitsarten über Krankheit/Urlaub hinaus, eine Ferien-/Feiertags-Anrechnung
   auf das Soll, eine Jahresarbeitszeit-Betrachtung und mehrere auswählbare Arbeitszeitmodelle je Bundesland.
+- Die Kategorie-Zuordnung der Tätigkeiten (Abschnitt 8, 11) ist statisch im Code hinterlegt. Neue oder umbenannte
+  Standard-Tätigkeiten müssen bei Bedarf manuell in `ACTIVITY_TO_CATEGORY` ergänzt werden, sonst erscheinen sie im
+  Kategorie-Diagramm unter „Sonstiges“.

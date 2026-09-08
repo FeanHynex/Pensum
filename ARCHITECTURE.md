@@ -1,6 +1,6 @@
 # Pensum – Technische Architektur
 
-Stand: 04.09.2026 (mit Ergänzung: Darkmode)
+Stand: 08.09.2026 (mit Ergänzung: Diagramme in der Auswertung)
 
 ## 1. Architekturprinzip
 
@@ -94,6 +94,8 @@ App
 ├── EntryForm
 ├── TagView
 ├── AuswertungView
+│   ├── CategoryDonut
+│   └── TrendChart
 ├── TemplateEditor
 └── EinstellungenView
 ```
@@ -160,7 +162,23 @@ Gemeinsames Formular für:
 
 Ermittelt anhand von `entries` einen Zeitraum und aggregiert die Ist-Arbeitszeit. Berechnet zusätzlich anhand von
 `templates`, `dayStatus`, `employment` und `config` (für das Schulstunden-Zeitfenster bei anteiliger Anrechnung) die
-Soll-Arbeitszeit und die anrechenbare Abwesenheitszeit des Zeitraums (siehe Abschnitt 12a).
+Soll-Arbeitszeit und die anrechenbare Abwesenheitszeit des Zeitraums (siehe Abschnitt 12a), begrenzt auf den
+Zeitraum ab dem frühesten jemals erfassten Eintrag (`firstEntryDate()`, siehe Abschnitt 12b).
+
+Für die Ist-Arbeitszeit wird zusätzlich eine Aufteilung nach Kategorie (`byCategory`, über `categoryOf()`) sowie ein
+Tagesverlauf (`dayStats`: Ist/Soll je Kalendertag im Zeitraum) ermittelt und über `CategoryDonut` bzw. `TrendChart`
+dargestellt (siehe Abschnitt 12c).
+
+### `CategoryDonut`
+
+Reine Darstellungskomponente: rendert ein SVG-Ringdiagramm für eine Liste `[kategorieKey, minuten]` plus
+Gesamtsumme. Keine eigene Logik oder Zustand, keine externe Chart-Bibliothek.
+
+### `TrendChart`
+
+Reine Darstellungskomponente: rendert für eine Liste `{ dateKey, actual, target }` einen horizontal scrollbaren
+Balkenverlauf (Ist als Balken, Soll als gestrichelte Linie) mit reinen `div`-Elementen/Tailwind-Klassen, ebenfalls
+ohne externe Chart-Bibliothek.
 
 ### `TemplateEditor`
 
@@ -536,6 +554,47 @@ Diese Berechnung ist unabhängig von den tatsächlich erfassten Einträgen (`ent
 iteriert rein über Kalendertage und die für das jeweilige Datum aktive Stundenplan-Vorlage. Die dabei entstehenden
 Zwischenwerte sind bewusst nicht gerundet (z. B. bei ungerader Aufteilung auf 5 Werktage oder anteiliger
 Krankheits-/Urlaubsanrechnung); erst `fmtDur()` rundet für die Anzeige auf ganze Minuten.
+
+## 12b. Startgrenze „erster Eintrag“
+
+`firstEntryDate(entries)` liefert das früheste Datum mit mindestens einem Eintrag über den kompletten `entries`-
+Bestand (nicht auf den aktuell gewählten Zeitraum begrenzt), oder `null`, falls noch keine Einträge existieren.
+
+In `AuswertungView` wird dieser Wert als `floorDate` in die Tagesschleife der Soll-/Anrechnungsberechnung
+eingebunden:
+
+```text
+für jeden Tag im Zeitraum:
+    beforeFirstEntry = floorDate vorhanden UND Tag < floorDate
+    dayTarget = beforeFirstEntry ? 0 : dailyTargetMinutes(...)
+    creditedAbsence-Zuwachs nur, falls NICHT beforeFirstEntry
+```
+
+Die Ist-Arbeitszeit (`actual`) ist davon unberührt, da vor `floorDate` ohnehin keine Einträge existieren können. Der
+Effekt: Soll, anrechenbare Abwesenheit und Bilanz laufen nie rückwirkend vor dem tatsächlichen Beginn der
+App-Nutzung, auch wenn ein gewählter Zeitraum (z. B. „Frei“ oder „Monat“) weiter zurückreicht.
+
+Ein Hinweistext in `AuswertungView` wird angezeigt, wenn `floorDate` nach dem (auf Kalendertag normalisierten)
+Anfang des aktuell dargestellten Zeitraums liegt – also nur dann, wenn die Begrenzung die angezeigten Werte
+tatsächlich beeinflusst.
+
+## 12c. Diagramme in der Auswertung
+
+Zusätzlich zur Tagesschleife für Soll/Anrechnung aggregiert `AuswertungView` in derselben Schleife:
+
+- `byCategory`: Summe der Ist-Arbeitszeit je Kategorie (`categoryOf(activity)`), analog zu `byActivity`.
+- `dayStats`: Liste `{ dateKey, actual, target }` je Kalendertag im Zeitraum (Ist aus den Einträgen dieses Tages,
+  Soll aus `dailyTargetMinutes()` bzw. `0` vor `floorDate`).
+
+`categoryOf(activity)` schlägt die Kategorie in `ACTIVITY_TO_CATEGORY` nach; ohne Treffer (z. B. bei
+benutzerdefinierten Tätigkeiten) wird `"sonstiges"` verwendet. `CATEGORY_META` enthält je Kategorie Anzeigename und
+Farbe für `CategoryDonut`.
+
+`CategoryDonut` zeichnet für `byCategory` (sortiert nach Anteil) ein SVG-Ringdiagramm mittels mehrerer
+`<circle>`-Elemente mit `strokeDasharray`/`strokeDashoffset` (kumulativer Offset je Segment) – keine externe
+Bibliothek. `TrendChart` zeichnet für `dayStats` je Kalendertag eine Balkensäule (Ist, gefüllt) mit einer
+gestrichelten Linie auf Höhe des Tages-Solls, in einem horizontal scrollbaren Container für längere Zeiträume. Der
+Verlauf wird nur ab Modus „Woche“ aufwärts angezeigt (nicht bei Modus „Tag“).
 
 ## 13. Import/Export
 

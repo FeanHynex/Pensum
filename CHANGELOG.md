@@ -2,6 +2,34 @@
 
 Alle Einträge beziehen sich auf den Stand des GitHub-Projekts. Die Datei soll bei relevanten zukünftigen Änderungen durch die bearbeitende KI ergänzt werden.
 
+## 2026-09-08
+
+### Funktionalität
+
+- Die Auswertung zeigt jetzt zusätzlich zur bestehenden Tätigkeits-Balkenliste ein Ringdiagramm („Aufteilung nach
+  Kategorie“) sowie einen Tagesverlauf („Verlauf: Ist vs. Soll“) für den gewählten Zeitraum. Tätigkeiten sind dafür
+  fest sieben Kategorien zugeordnet (Unterricht, Vor-/Nachbereitung, Kommunikation/Gremien, Aufsicht,
+  Verwaltung/Organisation, Fortbildung, Sonstiges); nicht zugeordnete bzw. benutzerdefinierte Tätigkeiten fallen
+  unter „Sonstiges“. Der Verlauf zeigt Ist (Balken) und Soll (gestrichelte Linie) je Kalendertag im Zeitraum und
+  wird bei Modus „Tag“ ausgeblendet.
+- Soll-Arbeitszeit, anrechenbare Abwesenheit und Bilanz werden jetzt erst ab dem Datum des allerersten jemals
+  erfassten Eintrags berechnet (`firstEntryDate()`), auch wenn der gewählte Auswertungszeitraum weiter zurückreicht.
+  Damit erzeugt ein späterer Einstieg in die App keine rückwirkend unerreichbare Soll-Bilanz. Ein Hinweistext in der
+  Auswertung macht darauf aufmerksam, wenn dies den angezeigten Zeitraum tatsächlich betrifft.
+
+### Technisch
+
+- Neue Komponenten `CategoryDonut` und `TrendChart` in `src/App.jsx`, beide als reines SVG/CSS ohne zusätzliche
+  Chart-Bibliothek umgesetzt (keine neue Abhängigkeit in `package.json`).
+- Neue Helfer in `src/App.jsx`: `categoryOf()`, `firstEntryDate()`, sowie die Konstanten `CATEGORY_META` und
+  `ACTIVITY_TO_CATEGORY`.
+- Keine Änderung an `localStorage`-Datenstrukturen; JSON-Export/-Import und CSV-Export bleiben unverändert.
+
+### Dokumentation
+
+- `AI_CONTEXT.md` und `ARCHITECTURE.md` um die neuen Diagramme, die Kategorie-Zuordnung und die „erster Eintrag“-
+  Startgrenze der Soll-/Bilanzberechnung ergänzt.
+
 ## 2026-09-04 (2)
 
 ### Fix
