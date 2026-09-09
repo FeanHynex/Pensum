@@ -2,6 +2,50 @@
 
 Alle Einträge beziehen sich auf den Stand des GitHub-Projekts. Die Datei soll bei relevanten zukünftigen Änderungen durch die bearbeitende KI ergänzt werden.
 
+## 2026-09-09
+
+### Funktionalität
+
+- Kurze Pausen zwischen zwei Schulstunden (Standard: bis zu 10 Minuten) zählen jetzt automatisch zur
+  Ist-Arbeitszeit, wenn die vorangehende Schulstunde als Arbeitszeit gebucht ist und für die Pause selbst kein
+  eigener Eintrag angelegt wurde. Hintergrund: Diese kurzen Pausen sind für Lehrkräfte real meist keine
+  Erholungspause, sondern Wegezeit (Klassenraum wechseln o. Ä.). Legt die Lehrkraft für eine solche Pause bewusst
+  einen eigenen Eintrag an (z. B. „Eigene Pause“ oder „Pausenaufsicht“), hat dieser weiterhin Vorrang. Längere
+  Pausen (z. B. die „große Pause“) sind von dieser Automatik nicht betroffen und funktionieren wie bisher.
+- Neuer, optionaler Block „Vorlaufzeit vor der 1. Stunde“ in der Tagesansicht (Standard 15 Minuten, in den
+  Einstellungen unter „Pausen & Vorlaufzeit" anpassbar, 0 deaktiviert ihn). Er bildet ab, dass eine Lehrkraft
+  bereits vor Beginn der 1. Stunde in der Schule sein muss, und zählt nach denselben Regeln automatisch zur
+  Arbeitszeit, wenn die 1. Stunde als Arbeitszeit gebucht ist.
+- Die betroffenen Pausen-Slots bleiben in der Tagesansicht weiterhin sichtbar (weiterhin editierbar, z. B. um sie
+  doch als echte Pause zu erfassen), zeigen bei automatischer Anrechnung aber zusätzlich den Hinweis „zählt
+  automatisch zur Stunde“ inkl. angerechneter Dauer.
+- Die automatisch angerechneten Minuten fließen in Ist-Arbeitszeit, Tätigkeits- und Kategorieauswertung ein
+  (zugerechnet zur Tätigkeit der jeweiligen Schulstunde), erzeugen aber bewusst keinen eigenen Eintrag und tauchen
+  daher nicht als eigene Zeile im CSV-Export auf.
+
+### Technisch
+
+- `package.json`: `"version"` von `0.0.1` auf `0.0.2` erhöht.
+- `src/App.jsx`:
+  - neue Konstante `SHORT_PAUSE_THRESHOLD_MIN` (10 Minuten) sowie Helfer `isShortGap()`;
+  - `config.leadTimeMinutes` (Standard 15) neu in `DEFAULT_CONFIG`, automatisch kompatibel mit älteren
+    gespeicherten Configs durch bestehende `{ ...DEFAULT_CONFIG, ...loaded }`-Merge-Logik;
+  - neue gemeinsame Komponente `PauseSlotRow` für die Darstellung aller Pausen-Slots (Pausen zwischen
+    Schulstunden sowie den neuen Vorlauf-Block vor der 1. Stunde), inkl. „zählt automatisch zur Stunde“-Hinweis;
+  - `TagView`: neuer Vorlauf-Block vor der 1. Stunde (Slot `pause-vor-1`), Berechnung von `autoCounts` je
+    Pausen-Slot;
+  - `AuswertungView`: zusätzlicher Durchlauf über `config.periods` pro Tag, um kurze Pausen und Vorlaufzeit ohne
+    eigenen Eintrag automatisch zu `actual`/`byActivity`/`byCategory` zu addieren;
+  - `EinstellungenView`: neue Sektion „Pausen & Vorlaufzeit“ mit Eingabefeld für `config.leadTimeMinutes`.
+
+### Dokumentation
+
+- `AI_CONTEXT.md`: neuer Abschnitt zur automatischen Anrechnung kurzer Pausen und der Vorlaufzeit (Abschnitt 6),
+  `config`-Datenmodell (Abschnitt 9) und Auswertungs-Abschnitt (11) ergänzt, „Bekannte Besonderheiten“ erweitert.
+- `ARCHITECTURE.md`: `config`-Schema, Eintragsarten (neuer Abschnitt „Vorlaufzeit vor der 1. Stunde“),
+  Zeitberechnung (neuer Abschnitt „Automatische Anrechnung kurzer Pausen“), Auswertungs-Datenfluss, CSV-Export und
+  Komponentenübersicht (`PauseSlotRow`) aktualisiert.
+
 ## 2026-09-08 (2)
 
 ### Funktionalität

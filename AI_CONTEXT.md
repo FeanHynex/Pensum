@@ -1,6 +1,6 @@
 # Pensum – Projektkontext für KI
 
-Stand: 08.09.2026 (mit Ergänzung: Versionsnummer und Testphase für ausgewählte Lehrkräfte)
+Stand: 09.09.2026 (mit Ergänzung: automatische Anrechnung kurzer Pausen und Vorlaufzeit vor der 1. Stunde)
 
 ## 1. Projekt
 
@@ -178,6 +178,33 @@ Aktuell gelten diese Tätigkeiten als **keine Arbeitszeit**:
 
 Die Dauer eines normalen Eintrags ist `max(0, Ende - Start)`.
 
+### Automatische Anrechnung kurzer Pausen und der Vorlaufzeit
+
+Kurze Pausen zwischen zwei Schulstunden (Standard: bis zu `SHORT_PAUSE_THRESHOLD_MIN` = 10 Minuten, siehe
+`src/App.jsx`) sind für Lehrkräfte real meist keine Erholungspause, sondern Wegezeit (Klassenraum wechseln o. Ä.).
+Solche kurzen Pausen zählen deshalb automatisch zur Arbeitszeit, **wenn**:
+
+- die direkt vorangehende Schulstunde einen Eintrag besitzt, der Arbeitszeit ist (`isWorkEntry(entry)`), **und**
+- für den Pausen-Slot selbst **kein eigener Eintrag** existiert.
+
+Legt die Lehrkraft für den Pausen-Slot bewusst einen eigenen Eintrag an (egal ob `Eigene Pause` oder eine andere
+Tätigkeit), hat dieser Eintrag immer Vorrang – die Automatik greift dann nicht mehr für diesen Slot.
+
+Längere Pausen (z. B. die „große Pause“, standardmäßig 20 Minuten) bleiben von der Automatik unberührt und
+funktionieren weiterhin wie bisher: ohne eigenen Eintrag zählen sie nicht als Arbeitszeit.
+
+Zusätzlich gibt es einen konfigurierbaren **Vorlaufzeit-Block vor der 1. Stunde** (`config.leadTimeMinutes`,
+Standard 15 Minuten, 0 deaktiviert den Block), da eine Lehrkraft bereits vor Beginn der 1. Stunde in der Schule sein
+muss. Er wird in der Tagesansicht wie ein zusätzlicher Pausen-Slot (`slot: "pause-vor-1"`) vor der 1. Stunde
+angezeigt und zählt nach denselben Regeln automatisch zur Arbeitszeit, wenn die 1. Stunde als Arbeitszeit gebucht
+ist und kein eigener Eintrag für den Slot existiert.
+
+Wichtig: Die automatisch angerechneten Minuten erzeugen **keinen eigenen Eintrag** in `entries` – sie werden nur
+zur Laufzeit in der Ist-Arbeitszeit, der Tätigkeits- und Kategorieauswertung ergänzt (siehe Abschnitt 11) und der
+Tätigkeit der zugehörigen Schulstunde zugerechnet. Der CSV-Export enthält daher weiterhin nur echte Einträge; die
+automatisch angerechneten Pausenminuten tauchen dort nicht als eigene Zeile auf, sind aber in der angezeigten
+Ist-Arbeitszeit der Auswertung enthalten.
+
 ## 6a. Soll-Arbeitszeit (Arbeitszeitmodell)
 
 Zusätzlich zur Ist-Arbeitszeit aus den Einträgen berechnet die App eine **Soll-Arbeitszeit**. Grundlage sind:
@@ -284,12 +311,15 @@ Aktuelle Speicher-Keys:
     percentage: 100,
     fullTimeWeeklyReferenceMinutes: 2798, // 46:38 h
     individualWeeklyTargetMinutes: null,
-  }
+  },
+  leadTimeMinutes: 15, // Vorlaufzeit vor der 1. Stunde in Minuten, 0 = deaktiviert
 }
 ```
 
 `config.employment` wird beim Laden additiv mit `DEFAULT_EMPLOYMENT` zusammengeführt, damit ältere gespeicherte
-Configs ohne dieses Feld kompatibel bleiben.
+Configs ohne dieses Feld kompatibel bleiben. `config.leadTimeMinutes` fehlt in älteren gespeicherten Configs
+ebenfalls nicht problematisch, da es beim Laden über `{ ...DEFAULT_CONFIG, ...loaded }` automatisch auf den
+Standardwert (15) zurückfällt, sofern kein eigener Wert gespeichert ist.
 
 `templates`:
 
@@ -387,7 +417,9 @@ Die Auswertung unterstützt:
 
 Sie berechnet:
 
-- tatsächlich geleistete Arbeitszeit (Ist) im Zeitraum
+- tatsächlich geleistete Arbeitszeit (Ist) im Zeitraum, **einschließlich** automatisch angerechneter kurzer
+  Pausen und Vorlaufzeit ohne eigenen Eintrag (siehe Abschnitt 6, „Automatische Anrechnung kurzer Pausen und der
+  Vorlaufzeit“)
 - Soll-Arbeitszeit im Zeitraum (Summe der Tages-Soll-Werte, siehe Abschnitt 6a)
 - anrechenbare Abwesenheitszeit (Summe der Tages-Soll-Werte an Tagen mit Status `SICK`/`VACATION`, gewichtet mit
   `dayAbsenceFraction()` – bei ganztägiger Abwesenheit voll, bei "ab"/"bis Uhrzeit" anteilig)
@@ -511,3 +543,8 @@ Eine solche Aufteilung sollte jedoch nicht nur aus Gründen der Optik erfolgen. 
 - Die Kategorie-Zuordnung der Tätigkeiten (Abschnitt 8, 11) ist statisch im Code hinterlegt. Neue oder umbenannte
   Standard-Tätigkeiten müssen bei Bedarf manuell in `ACTIVITY_TO_CATEGORY` ergänzt werden, sonst erscheinen sie im
   Kategorie-Diagramm unter „Sonstiges“.
+- Kurze Pausen zwischen Schulstunden (Standard bis 10 Minuten) sowie die Vorlaufzeit vor der 1. Stunde
+  (`config.leadTimeMinutes`) zählen automatisch zur Ist-Arbeitszeit, wenn die zugehörige Schulstunde Arbeitszeit
+  ist und kein eigener Eintrag für den Slot existiert (siehe Abschnitt 6). Das ist eine bewusste fachliche
+  Entscheidung (Wegezeit zwischen Klassenräumen bzw. Präsenzpflicht vor der 1. Stunde ist keine echte
+  Erholungspause) und keine reine technische Rundung.

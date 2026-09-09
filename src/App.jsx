@@ -45,6 +45,15 @@ const APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "
 const NONWORK = new Set(["Eigene Pause", "Ausgefallen"]);
 const WD_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
+// Kurze Pausen zwischen Schulstunden (z. B. 5 Minuten) sind für Lehrkräfte real keine Erholungspause,
+// sondern Wegezeit (Klassenraum wechseln etc.). Liegt eine solche kurze Pause direkt nach einer als
+// Arbeitszeit gebuchten Schulstunde und wurde für die Pause selbst kein eigener Eintrag angelegt, zählt
+// sie automatisch mit zur Arbeitszeit dieser Stunde (siehe AI_CONTEXT.md, Abschnitt 6a/11). Legt die
+// Lehrkraft für den Pausen-Slot dagegen bewusst einen eigenen Eintrag an (z. B. „Eigene Pause“ oder eine
+// andere Tätigkeit), gilt ausschließlich dieser Eintrag – die automatische Anrechnung greift dann nicht.
+const SHORT_PAUSE_THRESHOLD_MIN = 10;
+const isShortGap = (gapMinutes) => gapMinutes > 0 && gapMinutes <= SHORT_PAUSE_THRESHOLD_MIN;
+
 // Kategorisierung von Tätigkeiten für die Auswertung (Diagramm "Aufteilung nach Kategorie").
 // Feste Zuordnung ohne eigenen Einstellungen-Dialog; nicht in DEFAULT_ACTIVITIES aufgeführte bzw.
 // benutzerdefinierte Tätigkeiten fallen automatisch unter "sonstiges".
@@ -86,7 +95,13 @@ const DEFAULT_EMPLOYMENT = {
   fullTimeWeeklyReferenceMinutes: 46 * 60 + 38, // 46:38 h
   individualWeeklyTargetMinutes: null, // wenn gesetzt, überschreibt dies percentage-basierte Berechnung
 };
-const DEFAULT_CONFIG = { periods: DEFAULT_PERIODS, activities: DEFAULT_ACTIVITIES, employment: DEFAULT_EMPLOYMENT };
+// Vorlaufzeit vor der 1. Stunde: Lehrkräfte müssen bereits vor Beginn der ersten Schulstunde in der
+// Schule sein (Vorbereitung, Aufsicht, Weg zum Klassenraum). Dieser Block wird der Tagesansicht vor der
+// 1. Stunde als eigener, editierbarer Slot vorangestellt und zählt automatisch zur Arbeitszeit, sofern die
+// 1. Stunde als Arbeitszeit gebucht ist und kein eigener Eintrag für den Slot angelegt wurde (siehe oben).
+// 0 = deaktiviert (kein Block).
+const DEFAULT_LEAD_TIME_MINUTES = 15;
+const DEFAULT_CONFIG = { periods: DEFAULT_PERIODS, activities: DEFAULT_ACTIVITIES, employment: DEFAULT_EMPLOYMENT, leadTimeMinutes: DEFAULT_LEAD_TIME_MINUTES };
 
 const DAY_STATUS_LABELS = { WORK: "Arbeit", SICK: "Krank", VACATION: "Urlaub" };
 
@@ -254,6 +269,52 @@ function EntryForm({ initial, activities, onSave, onCancel, onDelete }) {
   );
 }
 
+// Gemeinsame Darstellung für Pausen-Slots: die kurze Pause zwischen zwei Schulstunden sowie der optionale
+// Vorlauf-Block vor der 1. Stunde. Ohne eigenen Eintrag zeigt der Slot einen Platzhalter; zählt er gerade
+// automatisch zur Arbeitszeit (siehe SHORT_PAUSE_THRESHOLD_MIN / leadTimeMinutes), wird das zusätzlich
+// vermerkt. Legt die Lehrkraft einen eigenen Eintrag an, hat dieser immer Vorrang vor der Automatik.
+function PauseSlotRow({ slotKey, start, end, slotEntry, editKey, setEditKey, activities, upsert, remove, autoCounts, autoMinutes, placeholderLabel }) {
+  const slotEditKey = `slot-${slotKey}`;
+  return (
+    <div className="border-b border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900">
+      {editKey === slotEditKey ? (
+        <div className="p-2">
+          <EntryForm
+            initial={slotEntry ? slotEntry : { start, end, activity: "Eigene Pause", note: "" }}
+            activities={activities}
+            onSave={(data) => upsert({ id: slotEntry?.id || uid(), periodNr: null, slot: slotKey, ...data })}
+            onCancel={() => setEditKey(null)}
+            onDelete={slotEntry ? () => remove(slotEntry.id) : undefined}
+          />
+        </div>
+      ) : slotEntry ? (
+        <button onClick={() => setEditKey(slotEditKey)} className="w-full flex items-center gap-3 px-4 py-1.5 pl-6 text-left">
+          <Coffee size={13} className="text-stone-400 dark:text-stone-500 shrink-0" />
+          <div className="flex-1 min-w-0 text-xs">
+            <span className={isWorkEntry(slotEntry) ? "text-stone-700 dark:text-stone-300" : "text-stone-400 dark:text-stone-500"}>{slotEntry.activity}</span>
+            <span className="text-stone-400 dark:text-stone-500 ml-2 tabular-nums">{slotEntry.start}–{slotEntry.end}</span>
+          </div>
+          <span className="text-xs text-stone-400 dark:text-stone-500 tabular-nums">{isWorkEntry(slotEntry) ? fmtDur(durationOf(slotEntry)) : "—"}</span>
+        </button>
+      ) : (
+        <button onClick={() => setEditKey(slotEditKey)}
+          className="w-full flex items-center gap-3 px-4 py-1.5 pl-6 text-left text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800">
+          <Coffee size={13} className="shrink-0" />
+          <div className="flex-1 min-w-0 text-xs">
+            <span>{placeholderLabel}</span>
+            {autoCounts && <span className="block text-[10px] text-emerald-700 dark:text-emerald-400">zählt automatisch zur Stunde</span>}
+          </div>
+          {autoCounts ? (
+            <span className="text-xs tabular-nums text-stone-500 dark:text-stone-400">{fmtDur(autoMinutes)}</span>
+          ) : (
+            <Plus size={13} />
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ---------------------------------- Tagesansicht ---------------------------------- */
 
 function TagView({ date, setDate, entries, setDayEntries, config, templates, holidays, dayStatus, setDayStatus }) {
@@ -366,6 +427,27 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
         </div>
       )}
 
+      {showGrid && periods.length > 0 && config.leadTimeMinutes > 0 && (() => {
+        const first = periods[0];
+        const leadStart = addMin(first.start, -config.leadTimeMinutes);
+        const leadSlotKey = "pause-vor-1";
+        const leadSlotEntry = slotEntries[leadSlotKey];
+        const leadCovered = !leadSlotEntry && isCoveredByAbsence(leadStart, first.start);
+        if (leadCovered) return null;
+        const firstEntry = periodEntries[first.nr];
+        const leadAutoCounts = !leadSlotEntry && !!firstEntry && isWorkEntry(firstEntry);
+        return (
+          <div className="border-t border-stone-300 dark:border-stone-700">
+            <PauseSlotRow
+              slotKey={leadSlotKey} start={leadStart} end={first.start} slotEntry={leadSlotEntry}
+              editKey={editKey} setEditKey={setEditKey} activities={config.activities} upsert={upsert} remove={remove}
+              autoCounts={leadAutoCounts} autoMinutes={config.leadTimeMinutes}
+              placeholderLabel={`Vor dem Unterricht ${leadStart}–${first.start}`}
+            />
+          </div>
+        );
+      })()}
+
       {showGrid && (
         <div className="border-t border-stone-300 dark:border-stone-700">
           {periods.map((p, i) => {
@@ -377,9 +459,9 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
             const gap = next ? toMin(next.start) - toMin(p.end) : 0;
             const slotKey = `pause-${p.nr}`;
             const slotEntry = slotEntries[slotKey];
-            const slotEditKey = `slot-${slotKey}`;
             const periodCovered = !entry && isCoveredByAbsence(p.start, p.end);
             const gapCovered = !slotEntry && next && isCoveredByAbsence(p.end, next.start);
+            const gapAutoCounts = !slotEntry && !!entry && isWorkEntry(entry) && isShortGap(gap);
 
             return (
               <React.Fragment key={p.nr}>
@@ -456,34 +538,12 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
                 </div>
 
                 {gap > 0 && !gapCovered && (
-                  <div className="border-b border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900">
-                    {editKey === slotEditKey ? (
-                      <div className="p-2">
-                        <EntryForm
-                          initial={slotEntry ? slotEntry : { start: p.end, end: next.start, activity: "Eigene Pause", note: "" }}
-                          activities={config.activities}
-                          onSave={(data) => upsert({ id: slotEntry?.id || uid(), periodNr: null, slot: slotKey, ...data })}
-                          onCancel={() => setEditKey(null)}
-                          onDelete={slotEntry ? () => remove(slotEntry.id) : undefined}
-                        />
-                      </div>
-                    ) : slotEntry ? (
-                      <button onClick={() => setEditKey(slotEditKey)} className="w-full flex items-center gap-3 px-4 py-1.5 pl-6 text-left">
-                        <Coffee size={13} className="text-stone-400 dark:text-stone-500 shrink-0" />
-                        <div className="flex-1 min-w-0 text-xs">
-                          <span className={isWorkEntry(slotEntry) ? "text-stone-700 dark:text-stone-300" : "text-stone-400 dark:text-stone-500"}>{slotEntry.activity}</span>
-                          <span className="text-stone-400 dark:text-stone-500 ml-2 tabular-nums">{slotEntry.start}–{slotEntry.end}</span>
-                        </div>
-                        <span className="text-xs text-stone-400 dark:text-stone-500 tabular-nums">{isWorkEntry(slotEntry) ? fmtDur(durationOf(slotEntry)) : "—"}</span>
-                      </button>
-                    ) : (
-                      <button onClick={() => setEditKey(slotEditKey)} className="w-full flex items-center gap-3 px-4 py-1.5 pl-6 text-left text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800">
-                        <Coffee size={13} className="shrink-0" />
-                        <span className="flex-1 text-xs">Pause {p.end}–{next.start}</span>
-                        <Plus size={13} />
-                      </button>
-                    )}
-                  </div>
+                  <PauseSlotRow
+                    slotKey={slotKey} start={p.end} end={next.start} slotEntry={slotEntry}
+                    editKey={editKey} setEditKey={setEditKey} activities={config.activities} upsert={upsert} remove={remove}
+                    autoCounts={gapAutoCounts} autoMinutes={gap}
+                    placeholderLabel={`Pause ${p.end}–${next.start}`}
+                  />
                 )}
               </React.Fragment>
             );
@@ -652,6 +712,7 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
     const byCategory = {};
     const rows = [];
     const dayStats = [];
+    const periodsSorted = [...config.periods].sort((a, b) => a.nr - b.nr);
 
     let cursor = new Date(range.from.getFullYear(), range.from.getMonth(), range.from.getDate());
     const last = new Date(range.to.getFullYear(), range.to.getMonth(), range.to.getDate());
@@ -660,7 +721,10 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
       const beforeFirstEntry = !!floorDate && cursor < floorDate;
 
       let dayActual = 0;
-      (entries[dateKey] || []).forEach((e) => {
+      const dayEntries = entries[dateKey] || [];
+      const periodEntryByNr = {};
+      const slotEntryByKey = {};
+      dayEntries.forEach((e) => {
         const dur = durationOf(e);
         rows.push({ date: dateKey, ...e, dur });
         if (isWorkEntry(e)) {
@@ -670,7 +734,36 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
           const cat = categoryOf(e.activity);
           byCategory[cat] = (byCategory[cat] || 0) + dur;
         }
+        if (e.periodNr != null) periodEntryByNr[e.periodNr] = e;
+        else if (e.slot) slotEntryByKey[e.slot] = e;
       });
+
+      // Kurze Pausen zwischen Schulstunden sowie der Vorlauf vor der 1. Stunde zählen automatisch zur
+      // Arbeitszeit, wenn die zugehörige Schulstunde Arbeitszeit ist und kein eigener Eintrag für den
+      // Pausen-Slot existiert (siehe SHORT_PAUSE_THRESHOLD_MIN / config.leadTimeMinutes weiter oben).
+      const addAuto = (minutes, activity) => {
+        if (minutes <= 0) return;
+        actual += minutes;
+        dayActual += minutes;
+        byActivity[activity] = (byActivity[activity] || 0) + minutes;
+        byCategory[categoryOf(activity)] = (byCategory[categoryOf(activity)] || 0) + minutes;
+      };
+      periodsSorted.forEach((p, i) => {
+        const entry = periodEntryByNr[p.nr];
+        if (!entry || !isWorkEntry(entry)) return;
+        const next = periodsSorted[i + 1];
+        if (!next) return;
+        const gap = toMin(next.start) - toMin(p.end);
+        const slotKey = `pause-${p.nr}`;
+        if (isShortGap(gap) && !slotEntryByKey[slotKey]) addAuto(gap, entry.activity);
+      });
+      if (periodsSorted.length && config.leadTimeMinutes > 0) {
+        const first = periodsSorted[0];
+        const entry = periodEntryByNr[first.nr];
+        if (entry && isWorkEntry(entry) && !slotEntryByKey["pause-vor-1"]) {
+          addAuto(config.leadTimeMinutes, entry.activity);
+        }
+      }
 
       // Soll und anrechenbare Abwesenheit (Krankheit/Urlaub) werden Tag für Tag über den Zeitraum
       // ermittelt, unabhängig von den erfassten Einträgen (siehe dailyTargetMinutes). Vor dem ersten
@@ -1104,6 +1197,27 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
         <button onClick={addPeriod} className="mt-2 flex items-center gap-1.5 text-sm text-emerald-800 dark:text-emerald-400">
           <Plus size={15} /> Stunde hinzufügen
         </button>
+      </section>
+
+      <section>
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Pausen &amp; Vorlaufzeit</h3>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
+          Kurze Pausen von bis zu {SHORT_PAUSE_THRESHOLD_MIN} Minuten zwischen zwei als Arbeitszeit gebuchten
+          Schulstunden zählen automatisch mit zur Stunde, ohne dass du dafür etwas eintragen musst – sie sind für
+          Wegezeiten meist keine echte Erholungspause. Längere Pausen (z. B. die große Pause) bleiben wie bisher
+          eigene, frei buchbare Einträge. Trägst du für eine kurze Pause selbst etwas ein, gilt dieser Eintrag.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
+          <span className="flex-1">Vorlaufzeit vor der 1. Stunde (Minuten)</span>
+          <input type="number" min="0" step="5" value={config.leadTimeMinutes}
+            onChange={(e) => setConfig({ ...config, leadTimeMinutes: Math.max(0, Number(e.target.value) || 0) })}
+            className="w-20 border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1 text-sm tabular-nums" />
+        </label>
+        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+          Da du schon vor Beginn der 1. Stunde in der Schule sein musst, wird dafür ein eigener Block vor der 1.
+          Stunde angezeigt, der bei einer gebuchten 1. Stunde ebenfalls automatisch als Arbeitszeit zählt. 0
+          deaktiviert den Block.
+        </p>
       </section>
 
       <section>
