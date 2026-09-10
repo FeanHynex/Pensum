@@ -95,13 +95,15 @@ const DEFAULT_EMPLOYMENT = {
   fullTimeWeeklyReferenceMinutes: 46 * 60 + 38, // 46:38 h
   individualWeeklyTargetMinutes: null, // wenn gesetzt, überschreibt dies percentage-basierte Berechnung
 };
-// Vorlaufzeit vor der 1. Stunde: Lehrkräfte müssen bereits vor Beginn der ersten Schulstunde in der
-// Schule sein (Vorbereitung, Aufsicht, Weg zum Klassenraum). Dieser Block wird der Tagesansicht vor der
-// 1. Stunde als eigener, editierbarer Slot vorangestellt und zählt automatisch zur Arbeitszeit, sofern die
-// 1. Stunde als Arbeitszeit gebucht ist und kein eigener Eintrag für den Slot angelegt wurde (siehe oben).
-// 0 = deaktiviert (kein Block).
-const DEFAULT_LEAD_TIME_MINUTES = 15;
-const DEFAULT_CONFIG = { periods: DEFAULT_PERIODS, activities: DEFAULT_ACTIVITIES, employment: DEFAULT_EMPLOYMENT, leadTimeMinutes: DEFAULT_LEAD_TIME_MINUTES };
+// Ankunftszeit vor der 1. Stunde: Lehrkräfte müssen bereits vor Beginn der ersten Schulstunde in der Schule
+// sein (Vorbereitung, Aufsicht, Weg zum Klassenraum). Bewusst als fester Uhrzeit-Wert (nicht als Minuten-Offset
+// zur 1. Stunde) modelliert, da die tatsächliche Ankunftszeit einer Lehrkraft in der Regel unabhängig davon ist,
+// wann die 1. Stunde an einem Tag beginnt (z. B. wegen Aufsicht, Fahrdienst, Konferenzen). Dieser Block wird der
+// Tagesansicht vor der 1. Stunde als eigener, editierbarer Slot vorangestellt (Ende = Start der 1. Stunde) und
+// zählt automatisch zur Arbeitszeit, sofern die 1. Stunde als Arbeitszeit gebucht ist und kein eigener Eintrag für
+// den Slot angelegt wurde (siehe oben). Leerer Wert ("") deaktiviert den Block.
+const DEFAULT_SCHOOL_ARRIVAL_TIME = "07:45";
+const DEFAULT_CONFIG = { periods: DEFAULT_PERIODS, activities: DEFAULT_ACTIVITIES, employment: DEFAULT_EMPLOYMENT, schoolArrivalTime: DEFAULT_SCHOOL_ARRIVAL_TIME };
 
 const DAY_STATUS_LABELS = { WORK: "Arbeit", SICK: "Krank", VACATION: "Urlaub" };
 
@@ -270,9 +272,11 @@ function EntryForm({ initial, activities, onSave, onCancel, onDelete }) {
 }
 
 // Gemeinsame Darstellung für Pausen-Slots: die kurze Pause zwischen zwei Schulstunden sowie der optionale
-// Vorlauf-Block vor der 1. Stunde. Ohne eigenen Eintrag zeigt der Slot einen Platzhalter; zählt er gerade
-// automatisch zur Arbeitszeit (siehe SHORT_PAUSE_THRESHOLD_MIN / leadTimeMinutes), wird das zusätzlich
-// vermerkt. Legt die Lehrkraft einen eigenen Eintrag an, hat dieser immer Vorrang vor der Automatik.
+// Block vor der 1. Stunde. Ohne eigenen Eintrag zeigt der Slot einen Platzhalter; zählt er gerade automatisch
+// zur Arbeitszeit (siehe SHORT_PAUSE_THRESHOLD_MIN / config.schoolArrivalTime), wird das zusätzlich vermerkt.
+// Legt die Lehrkraft einen eigenen Eintrag an, hat dieser immer Vorrang vor der Automatik. Der Slot bekommt dabei
+// bewusst keine vorbelegte Tätigkeit wie „Eigene Pause“, sondern denselben neutralen Standard wie eine Schulstunde
+// ohne Vorlage (erste konfigurierte Tätigkeit) – die Lehrkraft entscheidet aktiv, wofür die Zeit stand.
 function PauseSlotRow({ slotKey, start, end, slotEntry, editKey, setEditKey, activities, upsert, remove, autoCounts, autoMinutes, placeholderLabel }) {
   const slotEditKey = `slot-${slotKey}`;
   return (
@@ -280,7 +284,7 @@ function PauseSlotRow({ slotKey, start, end, slotEntry, editKey, setEditKey, act
       {editKey === slotEditKey ? (
         <div className="p-2">
           <EntryForm
-            initial={slotEntry ? slotEntry : { start, end, activity: "Eigene Pause", note: "" }}
+            initial={slotEntry ? slotEntry : { start, end, activity: activities[0], note: "" }}
             activities={activities}
             onSave={(data) => upsert({ id: slotEntry?.id || uid(), periodNr: null, slot: slotKey, ...data })}
             onCancel={() => setEditKey(null)}
@@ -427,9 +431,10 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
         </div>
       )}
 
-      {showGrid && periods.length > 0 && config.leadTimeMinutes > 0 && (() => {
+      {showGrid && periods.length > 0 && !!config.schoolArrivalTime && toMin(config.schoolArrivalTime) < toMin(periods[0].start) && (() => {
         const first = periods[0];
-        const leadStart = addMin(first.start, -config.leadTimeMinutes);
+        const leadStart = config.schoolArrivalTime;
+        const leadMinutes = toMin(first.start) - toMin(leadStart);
         const leadSlotKey = "pause-vor-1";
         const leadSlotEntry = slotEntries[leadSlotKey];
         const leadCovered = !leadSlotEntry && isCoveredByAbsence(leadStart, first.start);
@@ -441,7 +446,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
             <PauseSlotRow
               slotKey={leadSlotKey} start={leadStart} end={first.start} slotEntry={leadSlotEntry}
               editKey={editKey} setEditKey={setEditKey} activities={config.activities} upsert={upsert} remove={remove}
-              autoCounts={leadAutoCounts} autoMinutes={config.leadTimeMinutes}
+              autoCounts={leadAutoCounts} autoMinutes={leadMinutes}
               placeholderLabel={`Vor dem Unterricht ${leadStart}–${first.start}`}
             />
           </div>
@@ -740,7 +745,7 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
 
       // Kurze Pausen zwischen Schulstunden sowie der Vorlauf vor der 1. Stunde zählen automatisch zur
       // Arbeitszeit, wenn die zugehörige Schulstunde Arbeitszeit ist und kein eigener Eintrag für den
-      // Pausen-Slot existiert (siehe SHORT_PAUSE_THRESHOLD_MIN / config.leadTimeMinutes weiter oben).
+      // Pausen-Slot existiert (siehe SHORT_PAUSE_THRESHOLD_MIN / config.schoolArrivalTime weiter oben).
       const addAuto = (minutes, activity) => {
         if (minutes <= 0) return;
         actual += minutes;
@@ -757,11 +762,12 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
         const slotKey = `pause-${p.nr}`;
         if (isShortGap(gap) && !slotEntryByKey[slotKey]) addAuto(gap, entry.activity);
       });
-      if (periodsSorted.length && config.leadTimeMinutes > 0) {
+      if (periodsSorted.length && config.schoolArrivalTime) {
         const first = periodsSorted[0];
         const entry = periodEntryByNr[first.nr];
-        if (entry && isWorkEntry(entry) && !slotEntryByKey["pause-vor-1"]) {
-          addAuto(config.leadTimeMinutes, entry.activity);
+        const leadMinutes = toMin(first.start) - toMin(config.schoolArrivalTime);
+        if (entry && isWorkEntry(entry) && leadMinutes > 0 && !slotEntryByKey["pause-vor-1"]) {
+          addAuto(leadMinutes, entry.activity);
         }
       }
 
@@ -986,6 +992,34 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
   const [loadingHolidays, setLoadingHolidays] = useState(false);
   const [holidayError, setHolidayError] = useState("");
   const [importMsg, setImportMsg] = useState("");
+  const [pauseCleanup, setPauseCleanup] = useState(null); // null | { count, next }
+
+  // Bereinigt alte, manuell als "Eigene Pause" gespeicherte Einträge für kurze Pausen-Slots (und den Block
+  // vor der 1. Stunde), die vor Einführung der automatischen Anrechnung angelegt wurden. Ein eigener Eintrag
+  // hat immer Vorrang vor der Automatik (siehe AI_CONTEXT.md, Abschnitt 6a) – wurden z. B. beim Vorausplanen
+  // viele zukünftige Tage bereits mit "Eigene Pause" befüllt, blockiert das die Automatik dort dauerhaft, bis
+  // der jeweilige Eintrag gelöscht wird. Diese Funktion übernimmt das gebündelt für alle betroffenen Tage.
+  // Angefasst werden ausschließlich Einträge mit slot "pause-<nr>" (nur wenn kurz, <= SHORT_PAUSE_THRESHOLD_MIN)
+  // oder "pause-vor-1" (immer, unabhängig von der konfigurierten Länge) und activity "Eigene Pause" – eine
+  // bewusst als längere Pause erfasste "große Pause" oder eine andere Tätigkeit (z. B. "Pausenaufsicht") bleibt
+  // unangetastet.
+  const computePauseCleanup = () => {
+    let count = 0;
+    const next = {};
+    Object.keys(entries).forEach((dateKey) => {
+      const list = entries[dateKey] || [];
+      const kept = list.filter((e) => {
+        const isPauseSlot = e.slot === "pause-vor-1" || (typeof e.slot === "string" && e.slot.startsWith("pause-"));
+        if (!isPauseSlot || e.activity !== "Eigene Pause") return true;
+        const dur = toMin(e.end) - toMin(e.start);
+        const eligible = e.slot === "pause-vor-1" || isShortGap(dur);
+        if (eligible) { count += 1; return false; }
+        return true;
+      });
+      next[dateKey] = kept;
+    });
+    return { count, next };
+  };
 
   const updatePeriod = (nr, field, value) => {
     setConfig({ ...config, periods: config.periods.map((p) => (p.nr === nr ? { ...p, [field]: value } : p)) });
@@ -1200,7 +1234,7 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
       </section>
 
       <section>
-        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Pausen &amp; Vorlaufzeit</h3>
+        <h3 className="font-serif text-base text-stone-800 dark:text-stone-100 mb-1">Pausen &amp; Ankunftszeit</h3>
         <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
           Kurze Pausen von bis zu {SHORT_PAUSE_THRESHOLD_MIN} Minuten zwischen zwei als Arbeitszeit gebuchten
           Schulstunden zählen automatisch mit zur Stunde, ohne dass du dafür etwas eintragen musst – sie sind für
@@ -1208,16 +1242,47 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
           eigene, frei buchbare Einträge. Trägst du für eine kurze Pause selbst etwas ein, gilt dieser Eintrag.
         </p>
         <label className="flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
-          <span className="flex-1">Vorlaufzeit vor der 1. Stunde (Minuten)</span>
-          <input type="number" min="0" step="5" value={config.leadTimeMinutes}
-            onChange={(e) => setConfig({ ...config, leadTimeMinutes: Math.max(0, Number(e.target.value) || 0) })}
-            className="w-20 border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1 text-sm tabular-nums" />
+          <span className="flex-1">Ankunftszeit an der Schule</span>
+          <input type="time" value={config.schoolArrivalTime}
+            onChange={(e) => setConfig({ ...config, schoolArrivalTime: e.target.value })}
+            className="w-28 border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1 text-sm tabular-nums" />
+          <button onClick={() => setConfig({ ...config, schoolArrivalTime: "" })}
+            className="text-xs text-stone-400 dark:text-stone-500 underline">löschen</button>
         </label>
         <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-          Da du schon vor Beginn der 1. Stunde in der Schule sein musst, wird dafür ein eigener Block vor der 1.
-          Stunde angezeigt, der bei einer gebuchten 1. Stunde ebenfalls automatisch als Arbeitszeit zählt. 0
-          deaktiviert den Block.
+          Da du schon vor Beginn der 1. Stunde in der Schule sein musst, wird dafür in der Tagesansicht ein eigener
+          Block von dieser Ankunftszeit bis zum Beginn der 1. Stunde angezeigt, der bei einer gebuchten 1. Stunde
+          ebenfalls automatisch als Arbeitszeit zählt. Als feste Uhrzeit hinterlegt (statt als Minuten vor der 1.
+          Stunde), da deine tatsächliche Ankunftszeit meist unabhängig davon ist, wann die 1. Stunde an einem Tag
+          beginnt. Leer lassen deaktiviert den Block.
         </p>
+
+        <div className="mt-4 pt-3 border-t border-stone-200 dark:border-stone-800">
+          {!pauseCleanup ? (
+            <button onClick={() => setPauseCleanup(computePauseCleanup())}
+              className="w-full flex items-center justify-center gap-2 border border-stone-300 dark:border-stone-700 py-2 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800">
+              <Trash2 size={15} /> Alte „Eigene Pause“-Einträge für kurze Pausen bereinigen
+            </button>
+          ) : pauseCleanup.count === 0 ? (
+            <div className="text-sm text-stone-500 dark:text-stone-400 space-y-2">
+              <p>Keine betroffenen Einträge gefunden – die Automatik greift bereits überall, wo möglich.</p>
+              <button onClick={() => setPauseCleanup(null)} className="text-xs underline text-stone-400 dark:text-stone-500">Schließen</button>
+            </div>
+          ) : (
+            <div className="border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-3 text-sm text-rose-800 dark:text-rose-300 space-y-2">
+              <p>
+                {pauseCleanup.count} Eintrag{pauseCleanup.count === 1 ? "" : "e"} mit „Eigene Pause“ in kurzen
+                Pausen-Slots bzw. im Block vor der 1. Stunde gefunden (z. B. aus der Zeit vor dieser Funktion).
+                Löschen, damit dort ab sofort die automatische Anrechnung greift? Andere Pausen (z. B. die große
+                Pause) und Einträge mit anderer Tätigkeit (z. B. „Pausenaufsicht“) sind davon nicht betroffen.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => { setEntries(pauseCleanup.next); setPauseCleanup(null); }} className="flex-1 bg-rose-700 text-white py-1.5">Ja, löschen</button>
+                <button onClick={() => setPauseCleanup(null)} className="flex-1 border border-rose-300 dark:border-rose-800 py-1.5">Abbrechen</button>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       <section>

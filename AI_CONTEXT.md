@@ -1,6 +1,6 @@
 # Pensum – Projektkontext für KI
 
-Stand: 09.09.2026 (mit Ergänzung: automatische Anrechnung kurzer Pausen und Vorlaufzeit vor der 1. Stunde)
+Stand: 09.09.2026 (mit Ergänzung: automatische Anrechnung kurzer Pausen und Ankunftszeit vor der 1. Stunde)
 
 ## 1. Projekt
 
@@ -178,7 +178,7 @@ Aktuell gelten diese Tätigkeiten als **keine Arbeitszeit**:
 
 Die Dauer eines normalen Eintrags ist `max(0, Ende - Start)`.
 
-### Automatische Anrechnung kurzer Pausen und der Vorlaufzeit
+### Automatische Anrechnung kurzer Pausen und der Ankunftszeit
 
 Kurze Pausen zwischen zwei Schulstunden (Standard: bis zu `SHORT_PAUSE_THRESHOLD_MIN` = 10 Minuten, siehe
 `src/App.jsx`) sind für Lehrkräfte real meist keine Erholungspause, sondern Wegezeit (Klassenraum wechseln o. Ä.).
@@ -187,17 +187,33 @@ Solche kurzen Pausen zählen deshalb automatisch zur Arbeitszeit, **wenn**:
 - die direkt vorangehende Schulstunde einen Eintrag besitzt, der Arbeitszeit ist (`isWorkEntry(entry)`), **und**
 - für den Pausen-Slot selbst **kein eigener Eintrag** existiert.
 
-Legt die Lehrkraft für den Pausen-Slot bewusst einen eigenen Eintrag an (egal ob `Eigene Pause` oder eine andere
-Tätigkeit), hat dieser Eintrag immer Vorrang – die Automatik greift dann nicht mehr für diesen Slot.
+Legt die Lehrkraft für den Pausen-Slot bewusst einen eigenen Eintrag an (egal welche Tätigkeit), hat dieser Eintrag
+immer Vorrang – die Automatik greift dann nicht mehr für diesen Slot. Wichtig für Tests/Umstieg: Wurde für einen
+Pausen-Slot in der Vergangenheit bereits ein eigener Eintrag gespeichert (z. B. `Eigene Pause` aus einem früheren
+Test vor dieser Änderung, ggf. auch flächendeckend für viele vorausgeplante zukünftige Tage), bleibt dieser bestehen
+und blockiert die Automatik weiterhin – er muss aktiv gelöscht werden, damit die automatische Anrechnung für diesen
+Slot greift. Dafür gibt es in den Einstellungen unter „Pausen & Ankunftszeit“ die Aktion „Alte 'Eigene
+Pause'-Einträge für kurze Pausen bereinigen“, die genau diese Altdaten gebündelt über alle erfassten Tage hinweg
+findet und nach Bestätigung löscht (betroffen: `Eigene Pause` in kurzen `pause-<nr>`-Slots sowie immer in
+`pause-vor-1`; unberührt bleiben bewusst als „Eigene Pause“ erfasste längere Pausen wie die große Pause sowie
+Pausen-Slots mit einer anderen echten Tätigkeit wie `Pausenaufsicht`). Öffnet die Lehrkraft
+den Pausen-Slot ohne vorhandenen Eintrag, ist dort standardmäßig **keine** Tätigkeit wie `Eigene Pause` vorbelegt,
+sondern – analog zu einer Schulstunde ohne Vorlage – die erste konfigurierte Tätigkeit; die Lehrkraft wählt aktiv,
+wofür die Zeit stand.
 
 Längere Pausen (z. B. die „große Pause“, standardmäßig 20 Minuten) bleiben von der Automatik unberührt und
 funktionieren weiterhin wie bisher: ohne eigenen Eintrag zählen sie nicht als Arbeitszeit.
 
-Zusätzlich gibt es einen konfigurierbaren **Vorlaufzeit-Block vor der 1. Stunde** (`config.leadTimeMinutes`,
-Standard 15 Minuten, 0 deaktiviert den Block), da eine Lehrkraft bereits vor Beginn der 1. Stunde in der Schule sein
-muss. Er wird in der Tagesansicht wie ein zusätzlicher Pausen-Slot (`slot: "pause-vor-1"`) vor der 1. Stunde
-angezeigt und zählt nach denselben Regeln automatisch zur Arbeitszeit, wenn die 1. Stunde als Arbeitszeit gebucht
-ist und kein eigener Eintrag für den Slot existiert.
+Zusätzlich gibt es einen konfigurierbaren **Block vor der 1. Stunde** (`config.schoolArrivalTime`, Standard „07:45“,
+leerer Wert deaktiviert den Block), da eine Lehrkraft bereits vor Beginn der 1. Stunde in der Schule sein muss.
+Bewusst als **feste Uhrzeit** (nicht als Minuten-Offset zur 1. Stunde) modelliert, da die tatsächliche Ankunftszeit
+einer Lehrkraft in der Regel unabhängig davon ist, wann die 1. Stunde an einem Tag beginnt (z. B. wegen Aufsicht,
+Fahrdienst, Konferenzen) – die Lehrkraft trägt ihre reale Ankunftszeit einmal in den Einstellungen ein, das Ende des
+Blocks (Start der 1. Stunde) variiert dann automatisch mit dem Stundenplan des Tages. Er wird in der Tagesansicht
+wie ein zusätzlicher Pausen-Slot (`slot: "pause-vor-1"`) vor der 1. Stunde angezeigt und zählt nach denselben Regeln
+automatisch zur Arbeitszeit, wenn die 1. Stunde als Arbeitszeit gebucht ist und kein eigener Eintrag für den Slot
+existiert. Liegt `config.schoolArrivalTime` nicht vor dem Start der 1. Stunde, wird der Block an diesem Tag nicht
+angezeigt.
 
 Wichtig: Die automatisch angerechneten Minuten erzeugen **keinen eigenen Eintrag** in `entries` – sie werden nur
 zur Laufzeit in der Ist-Arbeitszeit, der Tätigkeits- und Kategorieauswertung ergänzt (siehe Abschnitt 11) und der
@@ -312,14 +328,17 @@ Aktuelle Speicher-Keys:
     fullTimeWeeklyReferenceMinutes: 2798, // 46:38 h
     individualWeeklyTargetMinutes: null,
   },
-  leadTimeMinutes: 15, // Vorlaufzeit vor der 1. Stunde in Minuten, 0 = deaktiviert
+  schoolArrivalTime: "07:45", // feste Ankunftszeit vor der 1. Stunde, "" = deaktiviert
 }
 ```
 
 `config.employment` wird beim Laden additiv mit `DEFAULT_EMPLOYMENT` zusammengeführt, damit ältere gespeicherte
-Configs ohne dieses Feld kompatibel bleiben. `config.leadTimeMinutes` fehlt in älteren gespeicherten Configs
+Configs ohne dieses Feld kompatibel bleiben. `config.schoolArrivalTime` fehlt in älteren gespeicherten Configs
 ebenfalls nicht problematisch, da es beim Laden über `{ ...DEFAULT_CONFIG, ...loaded }` automatisch auf den
-Standardwert (15) zurückfällt, sofern kein eigener Wert gespeichert ist.
+Standardwert („07:45“) zurückfällt, sofern kein eigener Wert gespeichert ist. Hinweis: Bis 09.09.2026 hieß dieses
+Feld `leadTimeMinutes` (Minuten-Offset zur 1. Stunde statt fester Uhrzeit); ältere Configs mit diesem Feldnamen
+werden nicht automatisch migriert, das veraltete Feld wird schlicht ignoriert und die Lehrkraft muss die
+Ankunftszeit einmalig neu in den Einstellungen eintragen.
 
 `templates`:
 
@@ -418,8 +437,8 @@ Die Auswertung unterstützt:
 Sie berechnet:
 
 - tatsächlich geleistete Arbeitszeit (Ist) im Zeitraum, **einschließlich** automatisch angerechneter kurzer
-  Pausen und Vorlaufzeit ohne eigenen Eintrag (siehe Abschnitt 6, „Automatische Anrechnung kurzer Pausen und der
-  Vorlaufzeit“)
+  Pausen und Ankunftszeit ohne eigenen Eintrag (siehe Abschnitt 6, „Automatische Anrechnung kurzer Pausen und der
+  Ankunftszeit“)
 - Soll-Arbeitszeit im Zeitraum (Summe der Tages-Soll-Werte, siehe Abschnitt 6a)
 - anrechenbare Abwesenheitszeit (Summe der Tages-Soll-Werte an Tagen mit Status `SICK`/`VACATION`, gewichtet mit
   `dayAbsenceFraction()` – bei ganztägiger Abwesenheit voll, bei "ab"/"bis Uhrzeit" anteilig)
@@ -543,8 +562,8 @@ Eine solche Aufteilung sollte jedoch nicht nur aus Gründen der Optik erfolgen. 
 - Die Kategorie-Zuordnung der Tätigkeiten (Abschnitt 8, 11) ist statisch im Code hinterlegt. Neue oder umbenannte
   Standard-Tätigkeiten müssen bei Bedarf manuell in `ACTIVITY_TO_CATEGORY` ergänzt werden, sonst erscheinen sie im
   Kategorie-Diagramm unter „Sonstiges“.
-- Kurze Pausen zwischen Schulstunden (Standard bis 10 Minuten) sowie die Vorlaufzeit vor der 1. Stunde
-  (`config.leadTimeMinutes`) zählen automatisch zur Ist-Arbeitszeit, wenn die zugehörige Schulstunde Arbeitszeit
+- Kurze Pausen zwischen Schulstunden (Standard bis 10 Minuten) sowie die Ankunftszeit vor der 1. Stunde
+  (`config.schoolArrivalTime`) zählen automatisch zur Ist-Arbeitszeit, wenn die zugehörige Schulstunde Arbeitszeit
   ist und kein eigener Eintrag für den Slot existiert (siehe Abschnitt 6). Das ist eine bewusste fachliche
   Entscheidung (Wegezeit zwischen Klassenräumen bzw. Präsenzpflicht vor der 1. Stunde ist keine echte
   Erholungspause) und keine reine technische Rundung.

@@ -151,8 +151,9 @@ im markierten Zeitraum liegen, werden als reiner Status-Hinweis dargestellt stat
 dafür ist keine Tätigkeitsauswahl mehr nötig. Bereits vorhandene Einträge in dieser Zeitspanne bleiben unverändert
 editierbar.
 
-Zusätzlich rendert `TagView` (sofern `config.leadTimeMinutes > 0`) vor der 1. Stunde einen weiteren Pausen-Slot
-(`slot: "pause-vor-1"`) für die Vorlaufzeit, mit derselben `PauseSlotRow`-Komponente wie die Pausen zwischen den
+Zusätzlich rendert `TagView` (sofern `config.schoolArrivalTime` gesetzt und vor dem Start der 1. Stunde liegt) vor
+der 1. Stunde einen weiteren Pausen-Slot (`slot: "pause-vor-1"`) für die Ankunftszeit, mit derselben
+`PauseSlotRow`-Komponente wie die Pausen zwischen den
 Schulstunden (siehe unten).
 
 ### `PauseSlotRow`
@@ -189,7 +190,7 @@ Soll-Arbeitszeit und die anrechenbare Abwesenheitszeit des Zeitraums (siehe Absc
 Zeitraum ab dem frühesten jemals erfassten Eintrag (`firstEntryDate()`, siehe Abschnitt 12b).
 
 Bei der Ist-Arbeitszeit werden zusätzlich zu den erfassten Einträgen die automatisch angerechneten Minuten aus
-kurzen Pausen und der Vorlaufzeit ergänzt (siehe Abschnitt 8, „Automatische Anrechnung kurzer Pausen“) – dafür
+kurzen Pausen und der Ankunftszeit ergänzt (siehe Abschnitt 8, „Automatische Anrechnung kurzer Pausen“) – dafür
 iteriert `AuswertungView` pro Kalendertag zusätzlich über `config.periods`, nicht nur über `entries[dateKey]`.
 
 Für die Ist-Arbeitszeit wird zusätzlich eine Aufteilung nach Kategorie (`byCategory`, über `categoryOf()`) sowie ein
@@ -218,9 +219,12 @@ Verwaltet:
 
 - Design-Modus (Hell/Dunkel/System) über die von `App` durchgereichten Props `theme`/`setTheme`
 - Schulstunden
-- Pausen & Vorlaufzeit (`config.leadTimeMinutes` – Dauer des Vorlauf-Blocks vor der 1. Stunde in Minuten, 0
-  deaktiviert ihn; die Schwelle für automatisch angerechnete kurze Pausen zwischen Schulstunden,
+- Pausen & Ankunftszeit (`config.schoolArrivalTime` – feste Ankunftszeit vor der 1. Stunde, leer/""
+  deaktiviert sie; die Schwelle für automatisch angerechnete kurze Pausen zwischen Schulstunden,
   `SHORT_PAUSE_THRESHOLD_MIN`, ist bewusst nicht konfigurierbar und fest im Code hinterlegt)
+- Bereinigung alter „Eigene Pause“-Einträge in kurzen Pausen-Slots/`pause-vor-1` (`computePauseCleanup()`, siehe
+  Abschnitt 7/8 „Automatische Anrechnung kurzer Pausen“ und Abschnitt 12 für die Filterkriterien) – mutiert direkt
+  `entries` über `setEntries`, unabhängig von `config`
 - Arbeitszeitmodell (`config.employment`: Beschäftigungsumfang, Vollzeit-Wochenreferenz, individuelle Wochen-Sollzeit)
 - Stundenplan-Vorlagen
 - Ferien
@@ -263,7 +267,7 @@ config
 │   ├── start
 │   └── end
 ├── activities[]
-├── leadTimeMinutes                        (Vorlaufzeit vor der 1. Stunde in Minuten, 0 = deaktiviert)
+├── schoolArrivalTime                      (feste Ankunftszeit vor der 1. Stunde, "HH:MM", "" = deaktiviert)
 └── employment
     ├── percentage                        (Beschäftigungsumfang in %)
     ├── fullTimeWeeklyReferenceMinutes     (Vollzeit-Wochenreferenz in Minuten)
@@ -271,9 +275,11 @@ config
 ```
 
 `config.employment` wird beim Laden aus `localStorage` additiv mit Standardwerten zusammengeführt (siehe `App`), damit
-ältere gespeicherte Configs ohne dieses Feld weiterhin funktionieren. `config.leadTimeMinutes` benötigt keine
+ältere gespeicherte Configs ohne dieses Feld weiterhin funktionieren. `config.schoolArrivalTime` benötigt keine
 gesonderte Merge-Logik: Da es Teil von `DEFAULT_CONFIG` ist und die Ladefunktion `{ ...DEFAULT_CONFIG, ...loaded }`
-verwendet, fällt ein fehlender Wert automatisch auf den Standard (15) zurück.
+verwendet, fällt ein fehlender Wert automatisch auf den Standard („07:45“) zurück. Ein älteres, gleichnamig
+gemeintes Feld `leadTimeMinutes` (Minuten-Offset statt fester Uhrzeit, bis 09.09.2026) wird dabei nicht migriert,
+sondern schlicht ignoriert.
 
 ### `templates`
 
@@ -376,7 +382,9 @@ Nur relevant, wenn die Lehrkraft für diesen Pausen-Slot **bewusst** einen eigen
 längere Pause wie die „große Pause“ tatsächlich als `Eigene Pause` zu erfassen, oder um dort eine echte Tätigkeit
 wie `Pausenaufsicht` zu buchen). Ohne einen solchen Eintrag existiert für kurze Pausen keine Zeile in `entries` –
 sie werden stattdessen zur Laufzeit automatisch mitgezählt (siehe Abschnitt 8, „Automatische Anrechnung kurzer
-Pausen“).
+Pausen“). Öffnet die Lehrkraft den Slot zum Bearbeiten, ist bewusst **keine** Tätigkeit wie `Eigene Pause`
+vorbelegt, sondern – wie bei einer Schulstunde ohne Vorlage – die erste konfigurierte Tätigkeit (`activities[0]`);
+die Lehrkraft trifft die Wahl aktiv (siehe `PauseSlotRow` in Abschnitt 4).
 
 ```js
 {
@@ -385,17 +393,17 @@ Pausen“).
   slot: "pause-1",
   start: "08:45",
   end: "08:50",
-  activity: "Eigene Pause",
+  activity: "Pausenaufsicht", // von der Lehrkraft frei gewählt, kein automatischer Vorgabewert
   note: ""
 }
 ```
 
-### Vorlaufzeit vor der 1. Stunde
+### Ankunftszeit vor der 1. Stunde
 
 Technisch derselbe Eintragstyp wie eine Pause zwischen Schulstunden, mit dem reservierten Slot-Schlüssel
-`"pause-vor-1"` und Zeitspanne `[1. Stunde Start − config.leadTimeMinutes, 1. Stunde Start]`. Wird ebenfalls nur
-gespeichert, wenn die Lehrkraft den Slot bewusst bearbeitet; andernfalls greift dieselbe automatische Anrechnung
-wie bei kurzen Pausen.
+`"pause-vor-1"` und Zeitspanne `[config.schoolArrivalTime, 1. Stunde Start]`. Wird ebenfalls nur gespeichert, wenn
+die Lehrkraft den Slot bewusst bearbeitet; andernfalls greift dieselbe automatische Anrechnung wie bei kurzen
+Pausen.
 
 ```js
 {
@@ -404,7 +412,7 @@ wie bei kurzen Pausen.
   slot: "pause-vor-1",
   start: "07:45",
   end: "08:00",
-  activity: "Eigene Pause",
+  activity: "Unterricht", // von der Lehrkraft frei gewählt, kein automatischer Vorgabewert
   note: ""
 }
 ```
@@ -474,21 +482,50 @@ Für jede Schulstunde p mit nachfolgender Stunde next:
   → gap Minuten werden der Ist-Arbeitszeit sowie byActivity/byCategory der Tätigkeit von eintrag_p zugerechnet
 
 Zusätzlich, für die 1. Stunde:
-  zählt config.leadTimeMinutes automatisch, wenn:
+  leadMinutes = toMin(1. Stunde Start) - toMin(config.schoolArrivalTime)
+  zählt automatisch, wenn:
+    - config.schoolArrivalTime ist gesetzt UND
     - die 1. Stunde besitzt einen Eintrag UND isWorkEntry(eintrag_1) UND
-    - config.leadTimeMinutes > 0 UND
+    - leadMinutes > 0 UND
     - für Slot "pause-vor-1" existiert KEIN eigener Eintrag
+  → leadMinutes werden der Ist-Arbeitszeit sowie byActivity/byCategory der Tätigkeit von eintrag_1 zugerechnet
 ```
 
 `SHORT_PAUSE_THRESHOLD_MIN` (Standard 10 Minuten) ist fest im Code hinterlegt und nicht über die Einstellungen
-konfigurierbar; `config.leadTimeMinutes` (Standard 15 Minuten, 0 deaktiviert den Block) ist konfigurierbar (siehe
-Abschnitt 6, `config`). Legt die Lehrkraft für einen betroffenen Pausen-Slot selbst einen Eintrag an, hat dieser
-immer Vorrang – die automatische Anrechnung greift dann für diesen Slot nicht mehr, unabhängig davon, ob der
-eigene Eintrag `isWorkEntry` ist oder nicht.
+konfigurierbar; `config.schoolArrivalTime` (Standard „07:45“, leerer Wert deaktiviert den Block) ist konfigurierbar
+(siehe Abschnitt 6, `config`) und bewusst als feste Uhrzeit statt als Minuten-Offset zur 1. Stunde modelliert, da
+die tatsächliche Ankunftszeit einer Lehrkraft in der Regel unabhängig vom jeweiligen Beginn der 1. Stunde ist.
+Legt die Lehrkraft für einen betroffenen Pausen-Slot selbst einen Eintrag an, hat dieser immer Vorrang – die
+automatische Anrechnung greift dann für diesen Slot nicht mehr, unabhängig davon, ob der eigene Eintrag
+`isWorkEntry` ist oder nicht (auch ein bereits vor dieser Änderung angelegter `Eigene Pause`-Eintrag blockiert die
+Automatik weiterhin, bis er gelöscht wird).
 
 Da diese Minuten keinen eigenen `entries`-Eintrag erzeugen, tauchen sie nicht als eigene Zeile im CSV-Export auf
 (siehe Abschnitt 13); sie sind ausschließlich in der von `AuswertungView` berechneten Ist-Arbeitszeit sowie den
 Tätigkeits-/Kategorie-Aggregaten enthalten.
+
+### Bereinigung alter „Eigene Pause“-Einträge (`computePauseCleanup`)
+
+Da ein eigener Eintrag die Automatik oben blockiert, kann es – insbesondere bei flächendeckend vorausgeplanten
+zukünftigen Tagen aus der Zeit vor Einführung der Automatik – vorkommen, dass sehr viele Tage bereits einen
+manuellen `Eigene Pause`-Eintrag für kurze Pausen-Slots besitzen. `EinstellungenView` bietet dafür eine gebündelte
+Bereinigung über alle Tage in `entries`:
+
+```text
+für jeden Tag in entries:
+  für jeden Eintrag e des Tages:
+    behalten, außer:
+      - e.slot ist "pause-vor-1" ODER beginnt mit "pause-" UND
+      - e.activity === "Eigene Pause" UND
+      - (e.slot === "pause-vor-1" ODER isShortGap(durationOf(e)))
+    → dann: löschen, Zähler ++
+```
+
+Das Ergebnis (Anzahl + bereinigtes `entries`-Objekt) wird zunächst nur berechnet und zur Bestätigung angezeigt;
+erst nach explizitem „Ja, löschen“ wird `setEntries(next)` aufgerufen (zweistufiges Bestätigungsmuster wie bei
+„Alle Daten zurücksetzen“, Abschnitt 13). Bewusst **nicht** entfernt werden `Eigene Pause`-Einträge in normal
+langen `pause-<nr>`-Slots (z. B. die 20-minütige große Pause) sowie Pausen-Slots mit einer anderen, echten
+Tätigkeit (z. B. `Pausenaufsicht`) – diese wurden bewusst so erfasst und sollen erhalten bleiben.
 
 ## 9. Tagesansicht – Entscheidungslogik
 
@@ -606,15 +643,16 @@ falls isWorkEntry()
 Die Detailzeilen werden zusätzlich für den CSV-Export gesammelt.
 
 Anschließend wird pro Tag zusätzlich `config.periods` durchlaufen, um automatisch anrechenbare kurze Pausen und die
-Vorlaufzeit vor der 1. Stunde zu ergänzen (siehe Abschnitt 8, „Automatische Anrechnung kurzer Pausen“):
+Ankunftszeit vor der 1. Stunde zu ergänzen (siehe Abschnitt 8, „Automatische Anrechnung kurzer Pausen“):
 
 ```text
 für jede Schulstunde p mit Eintrag, isWorkEntry(eintrag_p):
     falls isShortGap(gap zu next) und kein eigener Eintrag für "pause-{p.nr}"
         → gap-Minuten zusätzlich auf Gesamtarbeitszeit, byActivity[eintrag_p.activity], byCategory anrechnen
 für die 1. Stunde, falls dort ein Eintrag mit isWorkEntry existiert:
-    falls config.leadTimeMinutes > 0 und kein eigener Eintrag für "pause-vor-1"
-        → leadTimeMinutes zusätzlich anrechnen
+    leadMinutes = toMin(1. Stunde Start) - toMin(config.schoolArrivalTime)
+    falls config.schoolArrivalTime gesetzt, leadMinutes > 0 und kein eigener Eintrag für "pause-vor-1"
+        → leadMinutes zusätzlich anrechnen
 ```
 
 Diese zusätzlichen Minuten erzeugen keine eigene Zeile in den CSV-Detailzeilen (siehe Abschnitt 13) – sie fließen
@@ -719,7 +757,7 @@ eine mögliche „Vollversion") vorgesehen, ohne dass dafür bereits jetzt eine 
 ### CSV
 
 Der CSV-Export kommt aus `AuswertungView` und exportiert nur den aktuell gewählten Zeitraum. Er enthält
-ausschließlich echte `entries`-Einträge (`rows`); automatisch angerechnete kurze Pausen und Vorlaufzeit ohne
+ausschließlich echte `entries`-Einträge (`rows`); automatisch angerechnete kurze Pausen und Ankunftszeit ohne
 eigenen Eintrag (siehe Abschnitt 8/12) erzeugen keine eigene CSV-Zeile, sind aber in der zugehörigen
 Ist-Arbeitszeit-Anzeige enthalten.
 

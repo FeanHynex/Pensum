@@ -2,6 +2,66 @@
 
 Alle Einträge beziehen sich auf den Stand des GitHub-Projekts. Die Datei soll bei relevanten zukünftigen Änderungen durch die bearbeitende KI ergänzt werden.
 
+## 2026-09-10
+
+### Funktionalität
+
+- Neue Aktion in den Einstellungen unter „Pausen & Ankunftszeit“: **„Alte 'Eigene Pause'-Einträge für kurze
+  Pausen bereinigen“**. Hintergrund: Ein eigener, bereits gespeicherter Eintrag für einen Pausen-Slot hat immer
+  Vorrang vor der automatischen Anrechnung (siehe 2026-09-09). Wer – z. B. beim Vorausplanen vieler zukünftiger
+  Tage – schon flächendeckend „Eigene Pause“ für die kurzen Pausen und/oder den Block vor der 1. Stunde
+  eingetragen hatte, musste das bisher Tag für Tag einzeln löschen, damit die Automatik dort greift. Die neue
+  Funktion findet alle betroffenen Einträge über alle erfassten Tage hinweg, zeigt die Anzahl zur Kontrolle an und
+  löscht sie erst nach Bestätigung gesammelt.
+  - Betroffen sind ausschließlich Einträge mit Tätigkeit „Eigene Pause“ in den Slots `pause-<nr>` (nur wenn kurz,
+    ≤ 10 Minuten) oder `pause-vor-1` (immer, unabhängig von der eingestellten Länge der Ankunftszeit).
+  - **Nicht** betroffen: bewusst als „Eigene Pause“ erfasste längere Pausen (z. B. die 20-minütige große Pause)
+    sowie Pausen-Slots mit einer anderen, echten Tätigkeit (z. B. „Pausenaufsicht“) – diese Einträge bleiben
+    unverändert erhalten.
+
+### Technisch
+
+- `package.json`: Version `0.0.3` → `0.0.4`.
+- `src/App.jsx`, `EinstellungenView`: neue Funktion `computePauseCleanup()` (iteriert über `entries`, filtert
+  betroffene Slot-Einträge nach Slot-Schlüssel/Tätigkeit/Dauer) sowie zweistufige UI (Vorschau mit Anzahl →
+  Bestätigung → `setEntries(next)`), nach demselben Bestätigungsmuster wie „Alle Daten zurücksetzen“.
+
+## 2026-09-09 (2)
+
+### Funktionalität
+
+- Pausen-Slots (kurze Pausen zwischen Schulstunden sowie der Block vor der 1. Stunde) sind beim Öffnen nicht mehr
+  standardmäßig mit der Tätigkeit „Eigene Pause“ vorbelegt, sondern – wie eine Schulstunde ohne Vorlage – mit der
+  ersten konfigurierten Tätigkeit. Die Lehrkraft entscheidet dadurch aktiv, was in dem Slot passiert ist, statt
+  ungewollt eine „das war Pause“-Wertung vorgesetzt zu bekommen.
+  - **Wichtig für bereits getestete Tage:** Wurde für einen Pausen-Slot vor dieser Änderung schon ein eigener
+    Eintrag gespeichert (z. B. beim Ausprobieren automatisch „Eigene Pause“), bleibt dieser bestehen und blockiert
+    weiterhin die automatische Anrechnung aus dem letzten Update – ein eigener Eintrag hat immer Vorrang vor der
+    Automatik. Betroffene Slots müssen einmalig geöffnet und der alte Eintrag gelöscht werden, damit die
+    automatische Anrechnung dort greift.
+- Der Block vor der 1. Stunde nutzt jetzt eine feste, in den Einstellungen hinterlegte **Ankunftszeit** (z. B.
+  „07:45“) statt einer festen Minutenzahl vor der 1. Stunde. Damit bleibt die reale Ankunftszeit an Tagen mit
+  unterschiedlichem Stundenplan-Beginn stabil, statt sich relativ zur 1. Stunde zu verschieben. Leer lassen
+  deaktiviert den Block weiterhin.
+
+### Technisch
+
+- `src/App.jsx`:
+  - `config.leadTimeMinutes` (Minuten-Offset) ersetzt durch `config.schoolArrivalTime` (feste `"HH:MM"`-Uhrzeit,
+    Standard „07:45“, `""` deaktiviert); Auto-Anrechnung in `TagView` und `AuswertungView` entsprechend umgestellt
+    (`leadMinutes = toMin(1. Stunde Start) - toMin(config.schoolArrivalTime)`, nur falls positiv).
+  - `PauseSlotRow`: Default-Aktivität im `EntryForm`-Initialwert von `"Eigene Pause"` auf `activities[0]` geändert.
+  - Einstellungen: Eingabefeld für die Vorlaufzeit (Minuten-Zahl) durch ein Uhrzeit-Feld für die Ankunftszeit
+    ersetzt, inkl. „löschen“-Button zum Deaktivieren.
+  - Migrationshinweis: Ein älteres `config.leadTimeMinutes`-Feld aus vorherigen Test-Ständen wird nicht automatisch
+    übernommen; betroffene Lehrkräfte müssen die Ankunftszeit einmalig neu in den Einstellungen eintragen.
+
+### Dokumentation
+
+- `AI_CONTEXT.md` und `ARCHITECTURE.md`: `leadTimeMinutes` durchgängig durch `schoolArrivalTime` ersetzt,
+  Datenmodell, Eintragsarten, Entscheidungslogik und Auswertungs-Datenfluss entsprechend aktualisiert; Hinweis zu
+  bereits gespeicherten „Eigene Pause“-Einträgen aus früheren Tests ergänzt.
+
 ## 2026-09-09
 
 ### Funktionalität
@@ -16,6 +76,8 @@ Alle Einträge beziehen sich auf den Stand des GitHub-Projekts. Die Datei soll b
   Einstellungen unter „Pausen & Vorlaufzeit" anpassbar, 0 deaktiviert ihn). Er bildet ab, dass eine Lehrkraft
   bereits vor Beginn der 1. Stunde in der Schule sein muss, und zählt nach denselben Regeln automatisch zur
   Arbeitszeit, wenn die 1. Stunde als Arbeitszeit gebucht ist.
+  - Hinweis: Dieser Minuten-basierte Ansatz wurde im nachfolgenden Eintrag (2026-09-09 (2)) durch eine feste
+    Ankunftszeit ersetzt.
 - Die betroffenen Pausen-Slots bleiben in der Tagesansicht weiterhin sichtbar (weiterhin editierbar, z. B. um sie
   doch als echte Pause zu erfassen), zeigen bei automatischer Anrechnung aber zusätzlich den Hinweis „zählt
   automatisch zur Stunde“ inkl. angerechneter Dauer.
