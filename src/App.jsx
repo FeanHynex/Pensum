@@ -24,7 +24,7 @@ const DEFAULT_ACTIVITIES = [
   "Korrektur", "Elterngespräch", "Gespräch mit Schüler:in", "Gespräch mit Kolleg:in",
   "Konferenz", "Dienstbesprechung", "Pausenaufsicht", "Klassenleitung",
   "Organisation / Verwaltung", "Fortbildung", "Schulveranstaltung", "Klassenfahrt",
-  "Projektarbeit", "Eigene Pause", "Sonstiges",
+  "Projektarbeit", "Fahrt", "Nachtbereitschaft", "Eigene Pause", "Sonstiges",
 ];
 
 const BUNDESLAENDER = [
@@ -42,8 +42,36 @@ const BUNDESLAENDER = [
 // Fallback "0.0.0" nur zur Absicherung, falls das define ausnahmsweise fehlt.
 const APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0";
 
-const NONWORK = new Set(["Eigene Pause", "Ausgefallen"]);
+// "Fahrt" (Anreise/Abreise, z. B. bei Klassenfahrten) und "Nachtbereitschaft" (Schlaf-/Nachtaufsicht auf
+// Klassenfahrten) werden bewusst wie "Eigene Pause" als NONWORK geführt: Pensum trifft damit keine eigene
+// arbeitszeitrechtliche Entscheidung, ob diese Zeiten als Arbeitszeit zählen (siehe Klassenfahrten-Konzept,
+// Abschnitt 3/16). Sie werden weiterhin vollständig erfasst und in der Tages- sowie in der
+// Klassenfahrten-Auswertung separat ausgewiesen, fließen aber nicht in die normale Ist-Arbeitszeit ein.
+const NONWORK = new Set(["Eigene Pause", "Ausgefallen", "Fahrt", "Nachtbereitschaft"]);
 const WD_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+
+// Klassenfahrten: Kennzeichnung einzelner Kalendertage als Klassenfahrt-Tag (eigenständiger Speicher
+// `classTripDays`, siehe App()). Für Niedersachsen gilt für Lehrkräfte bei mehrtägigen Schulfahrten eine
+// zusätzliche Anrechnung von 1 Unterrichtsstunde je Tag (keine Wochen-Obergrenze mehr). Diese erste Version
+// setzt die Regel bewusst vereinfacht/pauschal für alle Beschäftigungsarten (verbeamtet/angestellt) und
+// unabhängig vom Teilzeitumfang um; eine gesonderte, rechtlich exakte Regel für Angestellte/Teilzeit ist noch
+// nicht spezifiziert (siehe Klassenfahrten-Konzept, letzter Absatz) und wird deshalb an jedem betroffenen Tag
+// sichtbar als "pauschal berechnet" ausgewiesen. Die Anrechnung fließt in die Mehr-/Minderzeitenlogik
+// (Bilanz) ein, wird aber nie als zusätzliche tatsächliche Arbeitszeit (Ist) gezählt.
+const CLASS_TRIP_CREDIT_LESSON_PERIODS = 1; // Unterrichtsstunden pro Klassenfahrt-Tag (Niedersachsen)
+
+// Länge "einer Unterrichtsstunde" für die Umrechnung der Klassenfahrt-Anrechnung in Minuten: bewusst NICHT
+// pauschal 60 Minuten (siehe Konzept, Abschnitt 10 – Unterrichtsstunde ≠ Zeitstunde), sondern die tatsächlich
+// konfigurierte Dauer der 1. Schulstunde. Ohne konfigurierte Stunden greift ein Standardwert von 45 Minuten.
+const FALLBACK_LESSON_PERIOD_MINUTES = 45;
+const lessonPeriodMinutesFor = (periods) => {
+  if (!periods || !periods.length) return FALLBACK_LESSON_PERIOD_MINUTES;
+  const sorted = [...periods].sort((a, b) => a.nr - b.nr);
+  const dur = toMin(sorted[0].end) - toMin(sorted[0].start);
+  return dur > 0 ? dur : FALLBACK_LESSON_PERIOD_MINUTES;
+};
+const classTripCreditMinutesPerDay = (config) =>
+  CLASS_TRIP_CREDIT_LESSON_PERIODS * lessonPeriodMinutesFor(config.periods);
 
 // Kurze Pausen zwischen Schulstunden (z. B. 5 Minuten) sind für Lehrkräfte real keine Erholungspause,
 // sondern Wegezeit (Klassenraum wechseln etc.). Liegt eine solche kurze Pause direkt nach einer als
@@ -321,7 +349,7 @@ function PauseSlotRow({ slotKey, start, end, slotEntry, editKey, setEditKey, act
 
 /* ---------------------------------- Tagesansicht ---------------------------------- */
 
-function TagView({ date, setDate, entries, setDayEntries, config, templates, holidays, dayStatus, setDayStatus }) {
+function TagView({ date, setDate, entries, setDayEntries, config, templates, holidays, dayStatus, setDayStatus, classTripDays, setClassTripDay }) {
   const dateKey = toISODate(date);
   const wd = wdIndex(date);
   const isWeekend = wd >= 5;
@@ -335,6 +363,7 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
   const activeTemplate = findTemplateFor(templates, date);
   const dayTemplate = (!isWeekend && activeTemplate) ? (activeTemplate.days[wd] || {}) : {};
   const showGrid = !isWeekend && !holiday && !isFullDayAbsence;
+  const isClassTrip = !!classTripDays[dateKey];
 
   const dayList = entries[dateKey] || [];
   const [editKey, setEditKey] = useState(null);
@@ -430,6 +459,22 @@ function TagView({ date, setDate, entries, setDayEntries, config, templates, hol
           </p>
         </div>
       )}
+
+      <div className="px-4 pb-3">
+        <button type="button" onClick={() => setClassTripDay(dateKey, !isClassTrip)}
+          className={`w-full py-1.5 text-sm border flex items-center justify-center gap-1.5 ${isClassTrip ? "bg-amber-700 text-stone-50 border-amber-700" : "border-stone-300 dark:border-stone-700 text-stone-600 dark:text-stone-400"}`}>
+          🏫 Klassenfahrt{isClassTrip ? " – aktiv" : ""}
+        </button>
+        {isClassTrip && (
+          <p className="text-xs text-amber-700 dark:text-amber-400 mt-1.5 leading-relaxed">
+            Klassenfahrt-Tag: „Fahrt“ und „Nachtbereitschaft“ zählen bewusst nicht automatisch als Ist-Arbeitszeit.
+            Anrechnung: +{CLASS_TRIP_CREDIT_LESSON_PERIODS} Unterrichtsstunde
+            ({fmtDur(classTripCreditMinutesPerDay(config))}) auf das Arbeitszeitkonto – pauschal berechnet für alle
+            Beschäftigungsarten und Teilzeitumfänge; eine gesonderte Regel für Angestellte/Teilzeit ist noch nicht
+            hinterlegt.
+          </p>
+        )}
+      </div>
 
       {showGrid && periods.length > 0 && !!config.schoolArrivalTime && toMin(config.schoolArrivalTime) < toMin(periods[0].start) && (() => {
         const first = periods[0];
@@ -684,7 +729,7 @@ function TrendChart({ days }) {
 
 /* ---------------------------------- Auswertung ---------------------------------- */
 
-function AuswertungView({ entries, templates, dayStatus, employment, config }) {
+function AuswertungView({ entries, templates, dayStatus, employment, config, classTripDays }) {
   const [mode, setMode] = useState("week");
   const [anchor, setAnchor] = useState(new Date());
   const [customFrom, setCustomFrom] = useState(toISODate(startOfWeek(new Date())));
@@ -709,7 +754,7 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
   // AI_CONTEXT.md, Abschnitt 11).
   const floorDate = useMemo(() => firstEntryDate(entries), [entries]);
 
-  const { actual, target, creditedAbsence, byActivity, byCategory, rows, dayStats } = useMemo(() => {
+  const { actual, target, creditedAbsence, byActivity, byCategory, rows, dayStats, classTrip } = useMemo(() => {
     let actual = 0;
     let target = 0;
     let creditedAbsence = 0;
@@ -718,6 +763,14 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
     const rows = [];
     const dayStats = [];
     const periodsSorted = [...config.periods].sort((a, b) => a.nr - b.nr);
+    const creditMinutesPerDay = classTripCreditMinutesPerDay(config);
+    // Klassenfahrten-Statistik: getrennt von der normalen Ist-Arbeitszeit geführt (siehe Klassenfahrten-Konzept).
+    let classTripDayCount = 0;
+    let classTripActual = 0; // reguläre Arbeitszeit an Klassenfahrt-Tagen (ohne Fahrt/Nachtbereitschaft/Pause)
+    let classTripFahrt = 0;
+    let classTripNacht = 0;
+    let classTripPause = 0;
+    let classTripCreditMinutes = 0;
 
     let cursor = new Date(range.from.getFullYear(), range.from.getMonth(), range.from.getDate());
     const last = new Date(range.to.getFullYear(), range.to.getMonth(), range.to.getDate());
@@ -729,6 +782,8 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
       const dayEntries = entries[dateKey] || [];
       const periodEntryByNr = {};
       const slotEntryByKey = {};
+      const isClassTripDay = !!classTripDays[dateKey];
+      if (isClassTripDay) classTripDayCount++;
       dayEntries.forEach((e) => {
         const dur = durationOf(e);
         rows.push({ date: dateKey, ...e, dur });
@@ -738,6 +793,11 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
           byActivity[e.activity] = (byActivity[e.activity] || 0) + dur;
           const cat = categoryOf(e.activity);
           byCategory[cat] = (byCategory[cat] || 0) + dur;
+          if (isClassTripDay) classTripActual += dur;
+        } else if (isClassTripDay) {
+          if (e.activity === "Fahrt") classTripFahrt += dur;
+          else if (e.activity === "Nachtbereitschaft") classTripNacht += dur;
+          else if (e.activity === "Eigene Pause") classTripPause += dur;
         }
         if (e.periodNr != null) periodEntryByNr[e.periodNr] = e;
         else if (e.slot) slotEntryByKey[e.slot] = e;
@@ -752,6 +812,7 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
         dayActual += minutes;
         byActivity[activity] = (byActivity[activity] || 0) + minutes;
         byCategory[categoryOf(activity)] = (byCategory[categoryOf(activity)] || 0) + minutes;
+        if (isClassTripDay) classTripActual += minutes;
       };
       periodsSorted.forEach((p, i) => {
         const entry = periodEntryByNr[p.nr];
@@ -779,16 +840,27 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
       if (!beforeFirstEntry) {
         const statusEntry = dayStatus[dateKey] || null;
         if (statusEntry) creditedAbsence += dayTarget * dayAbsenceFraction(config, statusEntry);
+        if (isClassTripDay) classTripCreditMinutes += creditMinutesPerDay;
       }
 
       dayStats.push({ dateKey, actual: dayActual, target: dayTarget });
       cursor = addDays(cursor, 1);
     }
 
-    return { actual, target, creditedAbsence, byActivity, byCategory, rows, dayStats };
-  }, [entries, range, templates, dayStatus, employment, config, floorDate]);
+    const classTrip = {
+      dayCount: classTripDayCount,
+      actual: classTripActual,
+      fahrt: classTripFahrt,
+      nacht: classTripNacht,
+      pause: classTripPause,
+      creditLessonPeriods: classTripDayCount * CLASS_TRIP_CREDIT_LESSON_PERIODS,
+      creditMinutes: classTripCreditMinutes,
+    };
 
-  const effective = actual + creditedAbsence;
+    return { actual, target, creditedAbsence, byActivity, byCategory, rows, dayStats, classTrip };
+  }, [entries, range, templates, dayStatus, employment, config, floorDate, classTripDays]);
+
+  const effective = actual + creditedAbsence + classTrip.creditMinutes;
   const difference = effective - target;
 
   const activityList = Object.entries(byActivity).sort((a, b) => b[1] - a[1]);
@@ -863,6 +935,11 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
             {difference >= 0 ? "+" : "−"}{fmtDur(Math.abs(difference))}
           </div>
         </div>
+        {classTrip.creditMinutes > 0 && (
+          <div className="col-span-2 text-[11px] text-amber-700 dark:text-amber-400 -mt-2">
+            davon {fmtDur(classTrip.creditMinutes)} Klassenfahrt-Anrechnung ({classTrip.creditLessonPeriods} Unterrichtsstunden, pauschal berechnet)
+          </div>
+        )}
       </div>
 
       {showFloorHint && (
@@ -896,6 +973,33 @@ function AuswertungView({ entries, templates, dayStatus, employment, config }) {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {classTrip.dayCount > 0 && (
+        <div className="px-4 py-4 border-b border-stone-300 dark:border-stone-700">
+          <div className="text-xs uppercase tracking-wide text-stone-400 dark:text-stone-500 mb-3">
+            🏫 Klassenfahrten im Zeitraum
+          </div>
+          <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-sm">
+            <span className="text-stone-500 dark:text-stone-400">Klassenfahrttage</span>
+            <span className="text-right tabular-nums text-stone-800 dark:text-stone-100">{classTrip.dayCount}</span>
+            <span className="text-stone-500 dark:text-stone-400">Tatsächliche Arbeitszeit</span>
+            <span className="text-right tabular-nums text-stone-800 dark:text-stone-100">{fmtDur(classTrip.actual)}</span>
+            <span className="text-stone-500 dark:text-stone-400">Fahrtzeit</span>
+            <span className="text-right tabular-nums text-stone-800 dark:text-stone-100">{fmtDur(classTrip.fahrt)}</span>
+            <span className="text-stone-500 dark:text-stone-400">Nachtbereitschaft</span>
+            <span className="text-right tabular-nums text-stone-800 dark:text-stone-100">{fmtDur(classTrip.nacht)}</span>
+            <span className="text-stone-500 dark:text-stone-400">Pausen</span>
+            <span className="text-right tabular-nums text-stone-800 dark:text-stone-100">{fmtDur(classTrip.pause)}</span>
+            <span className="text-stone-500 dark:text-stone-400">Besondere Anrechnung</span>
+            <span className="text-right tabular-nums text-stone-800 dark:text-stone-100">{classTrip.creditLessonPeriods} Unterrichtsstunden</span>
+          </div>
+          <p className="text-xs text-amber-700 dark:text-amber-400 mt-3 leading-relaxed">
+            Die tatsächliche Arbeitszeit während Klassenfahrten ist bewusst getrennt von der besonderen
+            Anrechnung ausgewiesen und wird nicht doppelt gezählt. Die Anrechnung ist aktuell pauschal
+            (1 Unterrichtsstunde je Klassenfahrt-Tag, unabhängig von Beschäftigungsart und Teilzeitumfang).
+          </p>
         </div>
       )}
 
@@ -981,7 +1085,7 @@ function TemplateEditor({ template, config, onChange, onClose }) {
 
 /* ---------------------------------- Einstellungen ---------------------------------- */
 
-function EinstellungenView({ config, setConfig, templates, setTemplates, holidaySettings, setHolidaySettings, entries, setEntries, dayStatus, setDayStatus, theme, setTheme, resetAll }) {
+function EinstellungenView({ config, setConfig, templates, setTemplates, holidaySettings, setHolidaySettings, entries, setEntries, dayStatus, setDayStatus, classTripDays, setClassTripDays, theme, setTheme, resetAll }) {
   const [newActivity, setNewActivity] = useState("");
   const employment = config.employment;
   const setEmployment = (patch) => setConfig({ ...config, employment: { ...employment, ...patch } });
@@ -1161,7 +1265,7 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
   };
 
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ appVersion: APP_VERSION, config, templates, holidaySettings, entries, dayStatus }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ appVersion: APP_VERSION, config, templates, holidaySettings, entries, dayStatus, classTripDays }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = `pensum_backup_${toISODate(new Date())}.json`; a.click();
@@ -1180,6 +1284,7 @@ function EinstellungenView({ config, setConfig, templates, setTemplates, holiday
         if (data.holidaySettings) setHolidaySettings(data.holidaySettings);
         if (data.entries) setEntries(data.entries);
         if (data.dayStatus) setDayStatus(data.dayStatus);
+        if (data.classTripDays) setClassTripDays(data.classTripDays);
         setImportMsg("Daten erfolgreich importiert.");
       } catch (err) {
         setImportMsg("Datei konnte nicht gelesen werden – ist es eine gültige Pensum-Sicherung?");
@@ -1516,6 +1621,7 @@ export default function App() {
   const [holidaySettings, setHolidaySettingsState] = useState(() => loadJSON("holidays", { bundesland: "NW", holidays: [] }));
   const [entries, setEntriesState] = useState(() => loadJSON("entries", {}));
   const [dayStatus, setDayStatusState] = useState(() => loadJSON("dayStatus", {}));
+  const [classTripDays, setClassTripDaysState] = useState(() => loadJSON("classTripDays", {}));
   const [theme, setThemeState] = useState(() => loadJSON("theme", "system"));
   const [tab, setTab] = useState("tag");
   const [date, setDate] = useState(new Date());
@@ -1540,6 +1646,7 @@ export default function App() {
   const setHolidaySettings = (next) => { setHolidaySettingsState(next); saveJSON("holidays", next); };
   const setEntries = (next) => { setEntriesState(next); saveJSON("entries", next); };
   const setDayStatus = (next) => { setDayStatusState(next); saveJSON("dayStatus", next); };
+  const setClassTripDays = (next) => { setClassTripDaysState(next); saveJSON("classTripDays", next); };
   const setTheme = (next) => { setThemeState(next); saveJSON("theme", next); };
   const setDayEntries = (dateKey, list) => {
     const next = { ...entries };
@@ -1551,12 +1658,18 @@ export default function App() {
     if (value) next[dateKey] = value; else delete next[dateKey];
     setDayStatus(next);
   };
+  const setClassTripDayFor = (dateKey, value) => {
+    const next = { ...classTripDays };
+    if (value) next[dateKey] = true; else delete next[dateKey];
+    setClassTripDays(next);
+  };
   const resetAll = () => {
     setConfig(DEFAULT_CONFIG);
     setTemplates([]);
     setHolidaySettings({ bundesland: "NW", holidays: [] });
     setEntries({});
     setDayStatus({});
+    setClassTripDays({});
   };
 
   const tabs = [
@@ -1574,10 +1687,12 @@ export default function App() {
 
       {tab === "tag" && (
         <TagView date={date} setDate={setDate} entries={entries} setDayEntries={setDayEntries} config={config}
-          templates={templates} holidays={holidaySettings.holidays} dayStatus={dayStatus} setDayStatus={setDayStatusFor} />
+          templates={templates} holidays={holidaySettings.holidays} dayStatus={dayStatus} setDayStatus={setDayStatusFor}
+          classTripDays={classTripDays} setClassTripDay={setClassTripDayFor} />
       )}
       {tab === "auswertung" && (
-        <AuswertungView entries={entries} templates={templates} dayStatus={dayStatus} employment={config.employment} config={config} />
+        <AuswertungView entries={entries} templates={templates} dayStatus={dayStatus} employment={config.employment}
+          config={config} classTripDays={classTripDays} />
       )}
       {tab === "einstellungen" && (
         <EinstellungenView
@@ -1586,6 +1701,7 @@ export default function App() {
           holidaySettings={holidaySettings} setHolidaySettings={setHolidaySettings}
           entries={entries} setEntries={setEntries}
           dayStatus={dayStatus} setDayStatus={setDayStatus}
+          classTripDays={classTripDays} setClassTripDays={setClassTripDays}
           theme={theme} setTheme={setTheme}
           resetAll={resetAll}
         />

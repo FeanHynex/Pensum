@@ -116,6 +116,7 @@ Verwaltet den globalen Anwendungszustand:
 - `holidaySettings`
 - `entries`
 - `dayStatus` (Tages-Status: Krank/Urlaub)
+- `classTripDays` (Klassenfahrt-Tage, siehe Abschnitt „Klassenfahrten“)
 - `theme` (Design-Modus: `"light" | "dark" | "system"`)
 - aktuell gewählter Tab
 - aktuell gewähltes Datum
@@ -140,10 +141,14 @@ Sie erhält unter anderem:
 - `templates`
 - `holidays`
 - `dayStatus`
+- `classTripDays`
 
-und verwendet `setDayEntries()` zum Speichern der Tagesdaten sowie `setDayStatus(dateKey, value)` zum Setzen bzw.
-(bei `value = null`) Löschen des Tages-Status. `value` ist entweder `null` (= Status `WORK`) oder
-`{ status: "SICK" | "VACATION", from?: "HH:MM", to?: "HH:MM" }` (siehe Abschnitt 6, `dayStatus`).
+und verwendet `setDayEntries()` zum Speichern der Tagesdaten, `setDayStatus(dateKey, value)` zum Setzen bzw.
+(bei `value = null`) Löschen des Tages-Status sowie `setClassTripDay(dateKey, boolean)` zum Setzen/Löschen des
+Klassenfahrt-Flags für den Tag. `value` bei `setDayStatus` ist entweder `null` (= Status `WORK`) oder
+`{ status: "SICK" | "VACATION", from?: "HH:MM", to?: "HH:MM" }` (siehe Abschnitt 6, `dayStatus`). Das
+Klassenfahrt-Flag ist von Krank/Urlaub unabhängig – ein Tag kann z. B. gleichzeitig `WORK` und Klassenfahrt sein
+(siehe Abschnitt „Klassenfahrten“).
 
 Bei ganztägiger Abwesenheit (weder `from` noch `to` gesetzt) wird das komplette Schulstundenraster ausgeblendet. Bei
 teilweiser Abwesenheit (`from` oder `to` gesetzt) bleibt das Raster sichtbar; Schulstunden ohne eigenen Eintrag, die
@@ -198,6 +203,12 @@ Tagesverlauf (`dayStats`: Ist/Soll je Kalendertag im Zeitraum) ermittelt und üb
 dargestellt (siehe Abschnitt 12c). Die automatisch angerechneten Minuten fließen dabei in `byActivity`/`byCategory`
 der Tätigkeit der zugehörigen Schulstunde ein.
 
+Zusätzlich erhält `AuswertungView` die Prop `classTripDays` und ermittelt im selben Tages-Durchlauf eine getrennte
+Klassenfahrten-Statistik (`classTrip`: Anzahl Tage, tatsächliche Arbeitszeit, Fahrtzeit, Nachtbereitschaft,
+Pausen, Anrechnung in Unterrichtsstunden/Minuten via `classTripCreditMinutesPerDay()`). Die Anrechnung fließt
+zusätzlich zu `creditedAbsence` in `effective` (und damit in die Bilanz) ein, aber nicht in `actual`. Siehe
+Abschnitt „Klassenfahrten“ für Details.
+
 ### `CategoryDonut`
 
 Reine Darstellungskomponente: rendert ein SVG-Ringdiagramm für eine Liste `[kategorieKey, minuten]` plus
@@ -229,8 +240,8 @@ Verwaltet:
 - Stundenplan-Vorlagen
 - Ferien
 - Tätigkeiten
-- Datenexport/-import (inkl. `dayStatus` und `appVersion`, aber **ohne** `theme` – der Design-Modus ist eine reine
-  Anzeigeeinstellung des Geräts/Browsers, kein Arbeitszeit-Datum)
+- Datenexport/-import (inkl. `dayStatus`, `classTripDays` und `appVersion`, aber **ohne** `theme` – der
+  Design-Modus ist eine reine Anzeigeeinstellung des Geräts/Browsers, kein Arbeitszeit-Datum)
 - Zurücksetzen (`resetAll` setzt ausdrücklich nicht `theme` zurück)
 - Anzeige der aktuellen App-Version (`APP_VERSION`, Abschnitt „Info") – reine Anzeige, kein `localStorage`-Wert
 
@@ -256,7 +267,7 @@ Die Daten werden nicht über einen globalen Context oder Redux verwaltet.
 
 ## 6. Persistente Daten
 
-Es existieren sechs logische Speicherbereiche:
+Es existieren sieben logische Speicherbereiche:
 
 ### `config`
 
@@ -350,6 +361,17 @@ dayStatus
 Nur Tage mit Abwesenheitsstatus haben einen Eintrag. Ohne Eintrag gilt ein Datum implizit als `"WORK"`. `from` und
 `to` schließen sich gegenseitig aus; sind beide nicht gesetzt, gilt der ganze Tag als abwesend.
 
+### `classTripDays`
+
+```text
+classTripDays
+└── YYYY-MM-DD → true
+```
+
+Nur als Klassenfahrt markierte Tage haben einen Eintrag (analog zu `dayStatus`). Das Flag ist unabhängig von
+`dayStatus` – ein Tag kann z. B. gleichzeitig `WORK` (kein `dayStatus`-Eintrag) und Klassenfahrt
+(`classTripDays[dateKey] === true`) sein. Siehe Abschnitt 12d „Klassenfahrten“.
+
 ### `theme`
 
 ```text
@@ -434,6 +456,13 @@ Pausen.
 ### Ausgefallene Stunde
 
 Eine reguläre Stunde kann mit `activity: "Ausgefallen"` gespeichert werden. Sie wird visuell speziell dargestellt und zählt nicht als Arbeitszeit.
+
+### Fahrt / Nachtbereitschaft (Klassenfahrt)
+
+Wie jeder andere freie oder Schulstunden-Eintrag, nur mit `activity: "Fahrt"` bzw. `activity: "Nachtbereitschaft"`.
+Beide sind Teil von `NONWORK` und zählen daher – wie `Eigene Pause`/`Ausgefallen` – nicht zur Ist-Arbeitszeit,
+werden aber vollständig erfasst und in der Klassenfahrten-Auswertung getrennt ausgewiesen (siehe Abschnitt 12d).
+Typischerweise (aber nicht zwingend) nur an Tagen mit `classTripDays[dateKey] === true` verwendet.
 
 ## 8. Zeitberechnung
 
@@ -638,6 +667,8 @@ Gesamtdauer
 falls isWorkEntry()
       ├── Gesamtarbeitszeit erhöhen
       └── Tätigkeit aggregieren
+sonst falls Tag als Klassenfahrt markiert und activity ∈ {"Fahrt", "Nachtbereitschaft", "Eigene Pause"}
+      └── getrennt in classTrip-Statistik aggregieren (siehe Abschnitt 12d), NICHT in Gesamtarbeitszeit
 ```
 
 Die Detailzeilen werden zusätzlich für den CSV-Export gesammelt.
@@ -669,8 +700,10 @@ für jeden Tag im Zeitraum:
     statusEntry = dayStatus[tag]  (oder null)
     falls statusEntry vorhanden:
         creditedAbsence += dayTarget × dayAbsenceFraction(config, statusEntry)
+    falls classTripDays[tag] vorhanden:
+        classTripCreditMinutes += classTripCreditMinutesPerDay(config)   (siehe Abschnitt 12d)
 
-effective = actual + creditedAbsence
+effective = actual + creditedAbsence + classTripCreditMinutes
 difference = effective - target
 ```
 
@@ -742,12 +775,40 @@ Bibliothek. `TrendChart` zeichnet für `dayStats` je Kalendertag eine Balkensäu
 gestrichelten Linie auf Höhe des Tages-Solls, in einem horizontal scrollbaren Container für längere Zeiträume. Der
 Verlauf wird nur ab Modus „Woche“ aufwärts angezeigt (nicht bei Modus „Tag“).
 
+## 12d. Klassenfahrten
+
+In derselben Tagesschleife wie 12/12a/12c aggregiert `AuswertungView` zusätzlich, sofern `classTripDays[tag]`
+gesetzt ist:
+
+```text
+classTripDayCount += 1
+classTripActual   += Ist-Arbeitszeit dieses Tages (isWorkEntry-Einträge + automatisch angerechnete Minuten)
+classTripFahrt     += Dauer der Einträge mit activity === "Fahrt"
+classTripNacht      += Dauer der Einträge mit activity === "Nachtbereitschaft"
+classTripPause      += Dauer der Einträge mit activity === "Eigene Pause"
+classTripCreditMinutes += classTripCreditMinutesPerDay(config)
+```
+
+`classTripCreditMinutesPerDay(config)` = `CLASS_TRIP_CREDIT_LESSON_PERIODS` (aktuell `1`) ×
+`lessonPeriodMinutesFor(config.periods)`. Letzteres liefert die Dauer der 1. konfigurierten Schulstunde
+(`toMin(end) - toMin(start)`) bzw. `45` Minuten als Fallback ohne konfigurierte Stunden – bewusst **nicht**
+pauschal 60 Minuten, um „Unterrichtsstunde“ nicht mit „Zeitstunde“ gleichzusetzen.
+
+Die aggregierten Werte (`classTrip`) werden nur dann als eigener Abschnitt „Klassenfahrten im Zeitraum“ gerendert,
+wenn `classTrip.dayCount > 0`. `classTripCreditMinutes` fließt zusätzlich in `effective`/die Bilanz-Kachel ein
+(siehe Abschnitt 12a); dort erscheint bei `classTrip.creditMinutes > 0` ein zusätzlicher Hinweistext.
+
+Bewusste Einschränkung dieser ersten Version: Es gibt weder ein übergeordnetes `ClassTrip`-Objekt noch ein
+`employment_type`-Feld (verbeamtet/angestellt); die Anrechnung wird pauschal für alle Beschäftigungsarten und
+Teilzeitumfänge in gleicher Höhe angesetzt und in der Tagesansicht sowie der Auswertung entsprechend als
+„pauschal berechnet“ gekennzeichnet. Details und offene Punkte siehe `AI_CONTEXT.md`, Abschnitt 16.
+
 ## 13. Import/Export
 
 ### JSON
 
-Der JSON-Export speichert den kompletten aktuellen App-Zustand, inklusive `dayStatus`, sowie zusätzlich
-`appVersion` (die `APP_VERSION` zum Exportzeitpunkt) als reine Migrations-/Diagnoseinformation.
+Der JSON-Export speichert den kompletten aktuellen App-Zustand, inklusive `dayStatus` und `classTripDays`, sowie
+zusätzlich `appVersion` (die `APP_VERSION` zum Exportzeitpunkt) als reine Migrations-/Diagnoseinformation.
 
 Der Import setzt die vorhandenen Bereiche nur dann, wenn der entsprechende Schlüssel in der Datei vorhanden ist.
 `appVersion` wird beim Import aktuell nicht ausgewertet oder geprüft – ältere Sicherungen ohne dieses Feld bleiben
@@ -837,3 +898,8 @@ src/
 ```
 
 Eine solche Aufteilung soll jedoch schrittweise erfolgen und nur dann, wenn sie die Wartbarkeit tatsächlich verbessert oder für eine Funktion erforderlich ist.
+
+Speziell zum Klassenfahrten-Modul (siehe Abschnitt 12d) bewusst zurückgestellte Erweiterungen: ein
+übergeordnetes `ClassTrip`-Objekt, ein `employment_type`-Feld (verbeamtet/angestellt) mit eigener, rechtlich
+geprüfter Anrechnungsregel für Angestellte/Teilzeitkräfte, ein erweiterbares Bundesland-Regelwerk sowie
+Auswertungs-Zeiträume „Schulhalbjahr“/„Schuljahr“. Details siehe `AI_CONTEXT.md`, Abschnitt 16.

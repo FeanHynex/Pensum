@@ -285,8 +285,14 @@ Die aktuelle Standardliste enthält unter anderem:
 - Schulveranstaltung
 - Klassenfahrt
 - Projektarbeit
+- Fahrt
+- Nachtbereitschaft
 - Eigene Pause
 - Sonstiges
+
+„Fahrt“ (z. B. Anreise/Abreise bei einer Klassenfahrt) und „Nachtbereitschaft“ (Schlaf-/Nachtaufsicht auf
+Klassenfahrten) sind wie „Eigene Pause“ und „Ausgefallen“ von der Ist-Arbeitszeit ausgeschlossen (`NONWORK` in
+`src/App.jsx`) – siehe Abschnitt 16 „Klassenfahrten“.
 
 Zusätzliche Tätigkeiten können in den Einstellungen angelegt werden.
 
@@ -308,6 +314,7 @@ Aktuelle Speicher-Keys:
 - `holidays`
 - `entries`
 - `dayStatus`
+- `classTripDays` (Klassenfahrt-Tage, siehe Abschnitt 16 „Klassenfahrten“)
 - `theme` (Design-Modus: `"light" | "dark" | "system"`, siehe Abschnitt 4 „Design-Modus (Darkmode)“; kein Teil des
   Arbeitszeit-Datenmodells, daher nicht im JSON-Export enthalten)
 
@@ -409,6 +416,17 @@ beiden gesetzt):
 
 Siehe `dayAbsenceFraction()` (Abschnitt 6a) für die daraus abgeleitete anteilige Anrechnung.
 
+`classTripDays`:
+
+```js
+{
+  "YYYY-MM-DD": true
+}
+```
+
+Nur als Klassenfahrt gekennzeichnete Tage besitzen einen Eintrag (analog zu `dayStatus`). Siehe Abschnitt 16
+„Klassenfahrten“ für die fachliche Bedeutung.
+
 ## 10. Ferien
 
 Das Bundesland ist konfigurierbar. Der aktuelle Initialwert ist `NW`.
@@ -442,14 +460,17 @@ Sie berechnet:
 - Soll-Arbeitszeit im Zeitraum (Summe der Tages-Soll-Werte, siehe Abschnitt 6a)
 - anrechenbare Abwesenheitszeit (Summe der Tages-Soll-Werte an Tagen mit Status `SICK`/`VACATION`, gewichtet mit
   `dayAbsenceFraction()` – bei ganztägiger Abwesenheit voll, bei "ab"/"bis Uhrzeit" anteilig)
-- Bilanz/Differenz: `Ist + anrechenbare Abwesenheit − Soll`
+- Bilanz/Differenz: `Ist + anrechenbare Abwesenheit + Klassenfahrt-Anrechnung − Soll`
 - Arbeitszeit nach Tätigkeit
 - Arbeitszeit nach Kategorie (siehe unten)
 - Tagesverlauf Ist vs. Soll für den gewählten Zeitraum (siehe unten)
+- eigener Abschnitt „Klassenfahrten im Zeitraum“, sofern der Zeitraum mindestens einen Klassenfahrt-Tag enthält
+  (siehe Abschnitt 16)
 - Detailzeilen für den CSV-Export
 
-`Eigene Pause` und `Ausgefallen` werden bei der Ist-Arbeitszeit, der Tätigkeits- und der Kategorieauswertung
-ausgeschlossen.
+`Eigene Pause`, `Ausgefallen`, `Fahrt` und `Nachtbereitschaft` werden bei der Ist-Arbeitszeit, der Tätigkeits- und
+der Kategorieauswertung ausgeschlossen (`NONWORK`). `Fahrt` und `Nachtbereitschaft` werden stattdessen separat in
+der Klassenfahrten-Auswertung ausgewiesen (siehe Abschnitt 16).
 
 Die vier Kennzahlen (Ist, Soll, Anrechnung, Bilanz) werden für Tag/Woche/Monat/freien Zeitraum gleich berechnet – die
 Soll- und Anrechnungswerte iterieren dafür Tag für Tag über den gewählten Zeitraum, unabhängig von den tatsächlich
@@ -514,7 +535,8 @@ Der JSON-Export enthält aktuell:
   templates,
   holidaySettings,
   entries,
-  dayStatus
+  dayStatus,
+  classTripDays
 }
 ```
 
@@ -567,3 +589,68 @@ Eine solche Aufteilung sollte jedoch nicht nur aus Gründen der Optik erfolgen. 
   ist und kein eigener Eintrag für den Slot existiert (siehe Abschnitt 6). Das ist eine bewusste fachliche
   Entscheidung (Wegezeit zwischen Klassenräumen bzw. Präsenzpflicht vor der 1. Stunde ist keine echte
   Erholungspause) und keine reine technische Rundung.
+
+## 16. Klassenfahrten
+
+Ausgangspunkt war ein ausführliches, extern erstelltes Konzeptdokument („Klassenfahrten“, Stand September 2026).
+Umgesetzt wurde daraus bewusst nur ein erster, kleiner Schritt; mehrere im Konzept beschriebene Ausbaustufen sind
+absichtlich zurückgestellt (siehe „Offene Punkte“ unten).
+
+### Grundprinzip
+
+Ein Klassenfahrt-Tag ist weiterhin ein ganz normaler Pensum-Arbeitstag mit den üblichen Zeitblöcken – es gibt
+kein separates Erfassungsmodell. Einzelne Kalendertage werden lediglich zusätzlich über `classTripDays[dateKey]`
+als Klassenfahrt-Tag markiert (Toggle in der Tagesansicht, unterhalb des Krank/Urlaub-Status). Es gibt **kein**
+übergeordnetes `ClassTrip`-Objekt (Titel/Zeitraum/Ziel/Bundesland) – dieser Teil des ursprünglichen Konzepts wurde
+für die erste Version bewusst zurückgestellt, siehe „Offene Punkte“.
+
+### Neue Tätigkeiten „Fahrt“ und „Nachtbereitschaft“
+
+Beide sind Teil von `DEFAULT_ACTIVITIES` und werden – wie `Eigene Pause` und `Ausgefallen` – als `NONWORK`
+geführt: Sie werden vollständig erfasst, zählen aber **nicht** automatisch zur Ist-Arbeitszeit, zur
+Tätigkeits-/Kategorieauswertung oder in den normalen Kategorie-Donut. Das ist eine bewusste fachliche
+Entscheidung: Pensum soll nicht selbst juristisch entscheiden, ob Fahrt- oder Nachtbereitschaftszeit
+Arbeitszeit ist. Pausen während einer Klassenfahrt werden weiterhin über die bestehende Tätigkeit `Eigene Pause`
+erfasst; es gibt keine eigene „Pause“-Kategorie nur für Klassenfahrten.
+
+### Anrechnung (Niedersachsen)
+
+Für jeden als Klassenfahrt markierten Tag wird automatisch eine zusätzliche Anrechnung von
+`CLASS_TRIP_CREDIT_LESSON_PERIODS` (aktuell `1`) Unterrichtsstunde/n auf das Arbeitszeitkonto (Bilanz)
+angerechnet – unabhängig vom Wochentag (auch Wochenend-Tage einer Klassenfahrt zählen, sofern die Lehrkraft sie
+einzeln als Klassenfahrt-Tag markiert). Die Umrechnung „Unterrichtsstunde → Minuten“ erfolgt bewusst **nicht**
+pauschal mit 60 Minuten, sondern über die Dauer der 1. konfigurierten Schulstunde (`lessonPeriodMinutesFor()`,
+Fallback 45 Minuten ohne konfigurierte Stunden).
+
+Diese Anrechnung fließt separat in `effective` (`actual + creditedAbsence + classTrip.creditMinutes`) und damit
+in die Bilanz ein, wird aber nirgends zur tatsächlichen Ist-Arbeitszeit addiert (dafür führt `AuswertungView`
+`classTrip.actual` getrennt).
+
+**Wichtige bewusste Vereinfachung:** Die Anrechnung wird aktuell pauschal für alle Beschäftigungsarten
+(verbeamtet/angestellt) und alle Teilzeitumfänge in gleicher Höhe angesetzt. Es gibt noch **kein**
+`employment_type`-Feld (verbeamtet/angestellt) im Datenmodell. Das Konzeptdokument weist selbst ausdrücklich
+darauf hin, dass die genaue rechtliche Berechnung für Angestellte und Teilzeitkräfte noch nicht abschließend
+spezifiziert ist und nicht aus der Plusstunden-Regel hergeleitet werden sollte. Damit diese Vereinfachung nicht
+unbemerkt bleibt, wird sie an jedem Klassenfahrt-Tag in der Tagesansicht als „pauschal berechnet“ ausgewiesen und
+auch in der Bilanz-Kachel sowie im Klassenfahrten-Auswertungsabschnitt entsprechend kommentiert.
+
+### Auswertung
+
+In `AuswertungView` erscheint bei mindestens einem Klassenfahrt-Tag im gewählten Zeitraum ein zusätzlicher
+Abschnitt „Klassenfahrten im Zeitraum“ mit: Anzahl Klassenfahrttage, tatsächliche Arbeitszeit an diesen Tagen
+(ohne Fahrt/Nachtbereitschaft/Pause), Fahrtzeit, Nachtbereitschaft, Pausen sowie der besonderen Anrechnung in
+Unterrichtsstunden. Der Abschnitt verwendet denselben Zeitraum-Filter (Tag/Woche/Monat/frei) wie der Rest der
+Auswertung; eigene Filter wie Schulhalbjahr/Schuljahr aus dem ursprünglichen Konzept gibt es noch nicht.
+
+### Offene Punkte (bewusst zurückgestellt)
+
+- Übergeordnetes `ClassTrip`-Objekt mit eigener Verwaltung (Titel, Zeitraum, Ziel, Bundesland) statt reinem
+  Tages-Flag.
+- `employment_type` (verbeamtet/angestellt) im Datenmodell sowie eine eigene, rechtlich geprüfte
+  Anrechnungsregel für Angestellte/Teilzeitkräfte anstelle der aktuellen Pauschalregel.
+- Erweiterbares Bundesland-Regelwerk (`getClassTripRule(federalState, employmentType, employmentPercentage,
+  date)` o. ä.) – aktuell ist nur die niedersächsische Pauschalregel fest hinterlegt
+  (`CLASS_TRIP_CREDIT_LESSON_PERIODS`, `classTripCreditMinutesPerDay()`).
+- Auswertungs-Zeiträume „Schulhalbjahr“/„Schuljahr“ speziell für Klassenfahrten.
+- CSV-Export ohne eigene Klassenfahrt-Spalte (Fahrt/Nachtbereitschaft erscheinen dort wie jede andere
+  Nicht-Arbeitszeit-Tätigkeit; das Klassenfahrt-Flag selbst wird nicht mitexportiert).

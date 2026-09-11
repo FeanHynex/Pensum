@@ -2,6 +2,52 @@
 
 Alle Einträge beziehen sich auf den Stand des GitHub-Projekts. Die Datei soll bei relevanten zukünftigen Änderungen durch die bearbeitende KI ergänzt werden.
 
+## 2026-09-10 (2)
+
+### Funktionalität
+
+- **Erster Schritt Richtung Klassenfahrten** (Grundlage: separat bereitgestelltes Konzeptdokument
+  „Klassenfahrten“). Umgesetzt wurde bewusst nur ein kleiner Ausschnitt des Konzepts; siehe „Offene Punkte“ in
+  `AI_CONTEXT.md`, Abschnitt 16, für zurückgestellte Teile (u. a. übergeordnetes `ClassTrip`-Objekt,
+  `employment_type`, Bundesland-Regelwerk, Schulhalbjahr-/Schuljahr-Filter).
+  - Neuer Toggle „🏫 Klassenfahrt“ in der Tagesansicht (unterhalb von Krank/Urlaub) markiert einzelne Kalendertage
+    als Klassenfahrt-Tag. Ein Tag kann gleichzeitig ein normaler Arbeitstag **und** Klassenfahrt sein.
+  - Zwei neue Tätigkeiten „Fahrt“ und „Nachtbereitschaft“ – wie „Eigene Pause“ zählen sie **nicht** automatisch zur
+    Ist-Arbeitszeit (bewusste Entscheidung: Pensum bewertet Fahrt-/Nachtbereitschaftszeit nicht selbst rechtlich),
+    werden aber vollständig erfasst.
+  - Jeder Klassenfahrt-Tag erhält automatisch eine Anrechnung von 1 Unterrichtsstunde auf das Arbeitszeitkonto
+    (Niedersachsen-Regel, keine Wochenobergrenze), umgerechnet über die Dauer der 1. konfigurierten Schulstunde
+    (nicht pauschal 60 Minuten). Die Anrechnung ist aktuell bewusst **pauschal für alle Beschäftigungsarten und
+    Teilzeitumfänge gleich hoch** und wird deshalb an jedem betroffenen Tag sowie in der Auswertung sichtbar als
+    „pauschal berechnet“ gekennzeichnet.
+  - Neuer Abschnitt „Klassenfahrten im Zeitraum“ in der Auswertung (nur sichtbar, wenn der gewählte Zeitraum
+    mindestens einen Klassenfahrt-Tag enthält): Anzahl Klassenfahrttage, tatsächliche Arbeitszeit an diesen Tagen,
+    Fahrtzeit, Nachtbereitschaft, Pausen, besondere Anrechnung.
+  - JSON-Export/-Import berücksichtigt den neuen Speicher `classTripDays` mit; „Alle Daten zurücksetzen“ löscht
+    ihn ebenfalls.
+
+### Technisch
+
+- `package.json`: Version `0.0.4` → `0.0.5`.
+- `src/App.jsx`:
+  - `DEFAULT_ACTIVITIES` um `"Fahrt"` und `"Nachtbereitschaft"` ergänzt; `NONWORK` um beide erweitert.
+  - Neue Konstanten/Helfer: `CLASS_TRIP_CREDIT_LESSON_PERIODS`, `FALLBACK_LESSON_PERIOD_MINUTES`,
+    `lessonPeriodMinutesFor()`, `classTripCreditMinutesPerDay()`.
+  - `App()`: neuer State `classTripDays` (Storage-Key `"classTripDays"`) mit Settern `setClassTripDays()` /
+    `setClassTripDayFor()`; Einbindung in `resetAll()` sowie Weitergabe an `TagView`, `AuswertungView`,
+    `EinstellungenView`.
+  - `TagView`: neue Props `classTripDays`, `setClassTripDay`; Toggle-Button + Hinweistext unterhalb des
+    Status-Blocks.
+  - `AuswertungView`: neue Prop `classTripDays`; Tagesschleife um `classTrip`-Aggregation erweitert
+    (`dayCount`, `actual`, `fahrt`, `nacht`, `pause`, `creditLessonPeriods`, `creditMinutes`); `effective`
+    schließt `classTrip.creditMinutes` mit ein; neuer Auswertungsabschnitt „Klassenfahrten im Zeitraum“.
+  - `EinstellungenView`: neue Props `classTripDays`, `setClassTripDays`; in `exportJSON()`/`importJSON()`
+    berücksichtigt.
+- Dokumentation aktualisiert: `AI_CONTEXT.md` (Abschnitte 8, 9, 11, 12, neuer Abschnitt 16 „Klassenfahrten“),
+  `ARCHITECTURE.md` (Abschnitte 4–7, 12–13, 16, neuer Abschnitt 12d „Klassenfahrten“).
+- **Nicht automatisiert getestet:** In dieser Umgebung war kein `npm install`/Build möglich (kein
+  Netzwerkzugriff). Vor dem Deploy empfiehlt sich ein lokaler `npm run build` bzw. `npm run dev`-Check.
+
 ## 2026-09-10
 
 ### Funktionalität
